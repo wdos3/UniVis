@@ -406,3 +406,12 @@ def research_results_csv() -> PlainTextResponse:
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": "attachment; filename=visnotice-study-results.csv"},
     )
+
+
+# Vercel's Python framework build serves the backend as the primary function.
+# Mount the already-built React bundle there so the hosted project remains a
+# single origin; local development continues to use Vite on port 5174.
+if os.getenv("VERCEL") == "1":
+    frontend_dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if frontend_dist.exists():
+        app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")

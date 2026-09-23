@@ -3,9 +3,8 @@
   "buildCommand": "npm --prefix frontend ci && npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/index.py" },
-    { "source": "/uploads/:path*", "destination": "/api/index.py" },
-    { "source": "/demo-images/:path*", "destination": "/api/index.py" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/:path*", "destination": "/api/index.py?route=/api/:path*" },
+    { "source": "/uploads/:path*", "destination": "/api/index.py?route=/uploads/:path*" },
+    { "source": "/demo-images/:path*", "destination": "/api/index.py?route=/demo-images/:path*" }
   ]
 }
