@@ -76,6 +76,10 @@ npm run dev -- --port 5174
 Open [http://localhost:5174](http://localhost:5174). API documentation is at [http://localhost:8001/docs](http://localhost:8001/docs).
 
 Docker users may copy `.env.example` to `.env` and run `docker compose up --build`.
+Compose starts the API at port 8001 and a separate CPU PaddleOCR service at port
+8002. The API sends image pages to that service over the private Compose network,
+so the API process does not need to load PaddleOCR itself. The OCR service downloads
+the two lightweight Korean/English model files on first use.
 
 ### Provisional Vercel deployment
 
@@ -84,11 +88,13 @@ deployment serves the Vite frontend and rewrites the FastAPI routes through
 `api/index.py`. Configure `OPENAI_API_KEY` (and any translation settings) in
 the Vercel project environment; never commit `.env` or secret values. The
 local runtime still uses PaddleOCR, but Vercel intentionally omits its large
-native packages because they exceed Vercel's function bundle limit. Therefore
-the hosted prototype is suitable for demos, text-file flows, translation, and
-semantic rendering; image OCR and image-only PDF handling should be run locally
-or on a container host. Vercel's temporary function filesystem also means uploads and SQLite
-study data are not durable across cold starts. See [the deployment notes](docs/VERCEL_DEPLOYMENT.md)
+native packages because they exceed Vercel's function bundle limit. Set
+`PADDLEOCR_SERVICE_URL`, `PADDLEOCR_SERVICE_TOKEN`, and
+`PADDLEOCR_SERVICE_TIMEOUT_SECONDS` to forward image OCR to the dedicated
+container; without them, the hosted prototype remains suitable for demos,
+text-file flows, translation, and semantic rendering only. Vercel's temporary
+function filesystem also means uploads and SQLite study data are not durable
+across cold starts. See [the deployment notes](docs/VERCEL_DEPLOYMENT.md)
 before treating this branch as production-ready.
 
 ## API configuration
@@ -103,6 +109,10 @@ Copy `.env.example` to `.env`. `OPENAI_API_KEY` is required only for arbitrary s
 | `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK` | Skip Paddle's extra model-host connectivity probe | `True` |
 | `PADDLEOCR_CPU_THREADS` | CPU threads used by local OCR | `8` |
 | `PADDLEOCR_ENABLE_MKLDNN` | oneDNN acceleration; disabled by default on Windows for compatibility | platform-dependent |
+| `PADDLEOCR_SERVICE_URL` | Optional dedicated OCR container URL; empty uses in-process OCR | unset |
+| `PADDLEOCR_SERVICE_TOKEN` | Shared secret for the dedicated OCR container | `local-dev-ocr-token` in Compose |
+| `PADDLEOCR_SERVICE_TIMEOUT_SECONDS` | Maximum OCR service request time | `90` |
+| `PADDLEOCR_CONTAINER_ENABLE_MKLDNN` | Linux container oneDNN acceleration toggle | `true` in Compose |
 | `TRANSLATION_PROVIDER` | `mymemory` or `libretranslate` | `mymemory` |
 | `MYMEMORY_URL` | Temporary no-key translation endpoint | MyMemory public API |
 | `LIBRETRANSLATE_URL` | Base URL for a self-hosted replacement | `http://127.0.0.1:5000` |
@@ -146,7 +156,7 @@ Photo(s) / screenshot / PDF / text
     ↓
 Image preparation + quality / QR checks
     ↓
-Local PaddleOCR PP-OCRv5 Korean (or embedded PDF/text input)
+Local PaddleOCR PP-OCRv5 Korean, either in-process or in the dedicated OCR container (or embedded PDF/text input)
     ↓
 Temporary translation provider (MyMemory or LibreTranslate)
     ↓
@@ -179,12 +189,14 @@ Backend tests cover image and multi-image upload, page order, image-only PDFs, E
 ```text
 visnotice-v2/
 ├── backend/app/          FastAPI routes, schemas, providers, fidelity, storage
+├── ocr_service/          Standalone PaddleOCR container image and dependencies
 ├── backend/tests/        API, schema, PDF, fidelity, and export tests
 ├── frontend/src/         React workspace, visual templates, research/admin views
 ├── demo_data/            Demo-data guidance
 ├── docs/                 Architecture, study design, schema, limitations
 ├── .env.example
 ├── docker-compose.yml
+├── .dockerignore
 └── start.ps1
 ```
 

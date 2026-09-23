@@ -25,14 +25,15 @@ appropriate). Never commit `.env` or secret values.
 - `TRANSLATION_PROVIDER` — defaults to `mymemory`.
 - `CORS_ORIGINS` — optional for cross-origin callers; the hosted UI uses
   same-origin API rewrites.
+- `PADDLEOCR_SERVICE_URL` — HTTPS URL of the separately hosted OCR container.
+- `PADDLEOCR_SERVICE_TOKEN` — server-side shared secret for that container.
+- `PADDLEOCR_SERVICE_TIMEOUT_SECONDS` — OCR request timeout, default `90`.
 
 The repository's local runtime installs PaddleOCR and PaddlePaddle from
 `backend/requirements.txt`. The Vercel function intentionally leaves those
 large native packages out because their bundle exceeds Vercel's 500 MB
-function limit. As a result, the hosted branch supports the demos, text-file
-flows, translation, and semantic rendering; PaddleOCR and image-only PDF
-handling remain available when running the same branch locally (or on a
-container host). The health
-endpoint reports `paddleocr-local-unavailable-on-vercel` instead of claiming
-that hosted image OCR is ready. This keeps the public prototype honest while
-the deployment architecture is evaluated.
+function limit. Configure the three `PADDLEOCR_SERVICE_*` variables above to
+enable image OCR from a separately hosted Docker service. Without that URL,
+the health endpoint reports `paddleocr-local-unavailable-on-vercel` and image
+OCR remains unavailable on Vercel. The browser never receives the container
+token; the FastAPI function forwards image bytes server-side.

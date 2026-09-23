@@ -1,14 +1,37 @@
 services:
+  ocr:
+    build:
+      context: .
+      dockerfile: ocr_service/Dockerfile
+    environment:
+      PADDLE_PDX_MODEL_SOURCE: ${PADDLE_PDX_MODEL_SOURCE:-BOS}
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: ${PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK:-true}
+      PADDLEOCR_CPU_THREADS: ${PADDLEOCR_CPU_THREADS:-8}
+      PADDLEOCR_ENABLE_MKLDNN: ${PADDLEOCR_CONTAINER_ENABLE_MKLDNN:-true}
+      PADDLEOCR_SERVICE_TOKEN: ${PADDLEOCR_SERVICE_TOKEN:-local-dev-ocr-token}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    ports:
+      - "8002:8000"
   backend:
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: backend/Dockerfile.api
+    depends_on:
+      ocr:
+        condition: service_healthy
     env_file: .env
     volumes:
       - ./data:/data
     environment:
       VISNOTICE_DB_PATH: /data/visnotice.db
       CORS_ORIGINS: http://localhost:5174
+      PADDLEOCR_SERVICE_URL: http://ocr:8000
+      PADDLEOCR_SERVICE_TOKEN: ${PADDLEOCR_SERVICE_TOKEN:-local-dev-ocr-token}
     ports:
       - "8001:8000"
   frontend:

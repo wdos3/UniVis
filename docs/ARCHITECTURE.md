@@ -12,7 +12,7 @@ VisNotice separates factual interpretation from presentation. AI providers retur
 
 Three provider boundaries keep acquisition, translation, and semantic interpretation separate:
 
-- `PaddleOcrProvider` runs the lightweight PP-OCRv5 detector and Korean recognizer locally, then assembles ordered page text. It performs a full-page pass and a footer-detail pass so small contact information is less likely to be missed.
+- `PaddleOcrProvider` runs the lightweight PP-OCRv5 detector and Korean recognizer locally, then assembles ordered page text. `RemotePaddleOcrProvider` sends the same ordered image bytes to the dedicated authenticated OCR container when `PADDLEOCR_SERVICE_URL` is configured. Both providers share the same result contract and preserve page-level warnings.
 - `TranslationProvider` performs translation without interpretation. MyMemory is the temporary no-key adapter and uses byte-bounded requests; `LibreTranslateProvider` supports a later self-hosted replacement.
 - `SemanticProvider` converts Korean OCR plus its machine translation into one strict `NoticeData` response. The live OpenAI provider makes exactly one structured-output request. Mock providers keep the five synthetic demos local.
 
@@ -52,7 +52,8 @@ Camera photo / image pages / PDF / Korean text
         |
         +-- image or visual PDF --> preserve original pages
         |                          EXIF + enhancement + quality + QR
-        |                          local PaddleOCR (Korean PP-OCRv5)
+        |                          PaddleOCR in-process or authenticated OCR container
+        |                          (Korean PP-OCRv5)
         |
         +-- selectable text ------> Korean detection
                                     |

@@ -167,8 +167,11 @@ def _pipeline_acquisition(
 
 @app.get("/api/health")
 def health() -> dict[str, object]:
-    ocr_provider = "paddleocr-ppocrv5-korean-local"
-    if os.getenv("VERCEL") == "1" and find_spec("paddleocr") is None:
+    if os.getenv("PADDLEOCR_SERVICE_URL", "").strip():
+        ocr_provider = "paddleocr-ppocrv5-korean-container"
+    else:
+        ocr_provider = "paddleocr-ppocrv5-korean-local"
+    if os.getenv("VERCEL") == "1" and find_spec("paddleocr") is None and not os.getenv("PADDLEOCR_SERVICE_URL", "").strip():
         ocr_provider = "paddleocr-local-unavailable-on-vercel"
     return {
         "status": "ok",

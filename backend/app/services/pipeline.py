@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from app.models import ConditionalGroup, NoticeData
 from app.services.demos import DEMOS
 from app.services.images.models import PreparedImage
-from app.services.ocr import OcrResult, PaddleOcrProvider
+from app.services.ocr import OcrResult, choose_ocr_provider
 from app.services.semantic import SemanticResult, choose_semantic_provider
 from app.services.translation import TranslationResult, choose_translation_provider
 
@@ -98,7 +98,7 @@ async def analyze_image_pipeline(images: list[PreparedImage], target_language: s
         ocr_latency_ms = 0
     else:
         ocr_started = perf_counter()
-        ocr = await PaddleOcrProvider().extract(images)
+        ocr = await choose_ocr_provider().extract(images)
         ocr_latency_ms = round((perf_counter() - ocr_started) * 1000)
         if len(re.findall(r"[가-힣]", ocr.text)) < 4:
             from app.services.ocr import OcrError
