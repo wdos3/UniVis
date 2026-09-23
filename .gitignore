@@ -11,9 +11,6 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 data/uploads/
 .DS_Store
-.python-version
-pyproject.toml
-uv.lock
 uv.lock.generated
 
 .vercel
