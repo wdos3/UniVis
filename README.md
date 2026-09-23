@@ -104,7 +104,7 @@ Copy `.env.example` to `.env`. `OPENAI_API_KEY` is required only for arbitrary s
 | Variable | Purpose | Default |
 |---|---|---|
 | `OPENAI_API_KEY` | Enables the single live semantic call | unset |
-| `OPENAI_MODEL` | Structured-output semantic model | `gpt-4.1-mini` |
+| `OPENAI_MODEL` | Structured-output semantic model | `gpt-4o-mini` |
 | `PADDLE_PDX_MODEL_SOURCE` | Paddle model host (`BOS` is the official object-store source) | `BOS` |
 | `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK` | Skip Paddle's extra model-host connectivity probe | `True` |
 | `PADDLEOCR_CPU_THREADS` | CPU threads used by local OCR | `8` |
@@ -118,6 +118,7 @@ Copy `.env.example` to `.env`. `OPENAI_API_KEY` is required only for arbitrary s
 | `LIBRETRANSLATE_URL` | Base URL for a self-hosted replacement | `http://127.0.0.1:5000` |
 | `LIBRETRANSLATE_API_KEY` | Optional key required by some LibreTranslate hosts | unset |
 | `TRANSLATION_TIMEOUT_SECONDS` | Translation request timeout | `20` |
+| `TRANSLATION_CONCURRENCY` | Concurrent MyMemory chunk requests | `4` |
 | `CORS_ORIGINS` | Allowed frontend origins | `http://localhost:5174` |
 | `VISNOTICE_DB_PATH` | SQLite file path | project `visnotice.db` |
 | `LOG_LEVEL` | Structured development log level | `INFO` |

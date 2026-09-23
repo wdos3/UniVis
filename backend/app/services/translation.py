@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import os
 import re
@@ -81,13 +82,15 @@ class MyMemoryTranslationProvider(TranslationProvider):
         self.endpoint = os.getenv("MYMEMORY_URL", "https://api.mymemory.translated.net/get")
         self.timeout = float(os.getenv("TRANSLATION_TIMEOUT_SECONDS", "20"))
 
-    async def _translate_chunk(self, chunk: str, source_language: str, target_language: str) -> str:
+    async def _translate_chunk(
+        self,
+        chunk: str,
+        source_language: str,
+        target_language: str,
+        client: httpx.AsyncClient,
+    ) -> str:
         params = {"q": chunk, "langpair": f"{source_language}|{target_language}"}
-        if self.client is not None:
-            response = await self.client.get(self.endpoint, params=params, timeout=self.timeout)
-        else:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(self.endpoint, params=params, timeout=self.timeout)
+        response = await client.get(self.endpoint, params=params, timeout=self.timeout)
         response.raise_for_status()
         payload = response.json()
         if int(payload.get("responseStatus", response.status_code)) != 200:
@@ -100,7 +103,18 @@ class MyMemoryTranslationProvider(TranslationProvider):
     async def translate(self, text: str, source_language: str, target_language: str) -> TranslationResult:
         chunks = split_utf8_chunks(text)
         try:
-            translated = [await self._translate_chunk(chunk, source_language, target_language) for chunk in chunks]
+            concurrency = max(1, int(os.getenv("TRANSLATION_CONCURRENCY", "4")))
+            semaphore = asyncio.Semaphore(concurrency)
+
+            async def translate_chunk(chunk: str, client: httpx.AsyncClient) -> str:
+                async with semaphore:
+                    return await self._translate_chunk(chunk, source_language, target_language, client)
+
+            if self.client is not None:
+                translated = await asyncio.gather(*(translate_chunk(chunk, self.client) for chunk in chunks))
+            else:
+                async with httpx.AsyncClient() as client:
+                    translated = await asyncio.gather(*(translate_chunk(chunk, client) for chunk in chunks))
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             raise TranslationError("The temporary MyMemory translation service is unavailable or its quota was reached.") from exc
         return TranslationResult(text="\n\n".join(translated), provider=self.name, request_count=len(chunks))

@@ -180,7 +180,7 @@ def health() -> dict[str, object]:
         "default_provider": "openai" if os.getenv("OPENAI_API_KEY") else "mock",
         "translation_provider": os.getenv("TRANSLATION_PROVIDER", "mymemory"),
         "ocr_provider": ocr_provider,
-        "semantic_model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        "semantic_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
     }
 
 

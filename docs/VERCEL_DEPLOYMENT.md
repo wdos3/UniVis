@@ -21,7 +21,7 @@ Configure these in the Vercel project settings (Production and Preview as
 appropriate). Never commit `.env` or secret values.
 
 - `OPENAI_API_KEY` — required for real semantic analysis.
-- `OPENAI_MODEL` — defaults to `gpt-4.1-mini`.
+- `OPENAI_MODEL` — defaults to `gpt-4o-mini` for the lower-latency semantic path. Set `gpt-4.1-mini` when higher extraction quality is worth the extra latency.
 - `TRANSLATION_PROVIDER` — defaults to `mymemory`.
 - `CORS_ORIGINS` — optional for cross-origin callers; the hosted UI uses
   same-origin API rewrites.

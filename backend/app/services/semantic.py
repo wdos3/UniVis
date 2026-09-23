@@ -82,7 +82,7 @@ class OpenAISemanticProvider(SemanticProvider):
         if client is None and not api_key:
             raise SemanticError("OPENAI_API_KEY is not configured.")
         self.client = client or AsyncOpenAI(api_key=api_key)
-        self.model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+        self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
     async def analyze(self, source_text: str, translation: str, target_language: str) -> SemanticResult:
         values = sorted(exact_values(source_text))
