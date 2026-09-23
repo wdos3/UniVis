@@ -22,7 +22,11 @@ The services are:
 
 Compose gives the backend the internal URL `http://ocr:8000`. The shared
 `PADDLEOCR_SERVICE_TOKEN` protects the OCR endpoint even on a shared Docker
-network. Do not use the example token for a public deployment.
+network. The named `paddle_models` volume stores the downloaded model files so
+restarting the container does not download them again. oneDNN is disabled by
+default because the current Paddle 3.3 model/runtime combination can fail on
+the OCR pipeline's PIR attributes when it is enabled. Do not use the example
+token for a public deployment.
 
 ## Connecting Vercel to a hosted OCR container
 
