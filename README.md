@@ -112,7 +112,7 @@ Copy `.env.example` to `.env`. `OPENAI_API_KEY` is required only for arbitrary s
 | `PADDLEOCR_SERVICE_URL` | Optional dedicated OCR container URL; empty uses in-process OCR | unset |
 | `PADDLEOCR_SERVICE_TOKEN` | Shared secret for the dedicated OCR container | `local-dev-ocr-token` in Compose |
 | `PADDLEOCR_SERVICE_TIMEOUT_SECONDS` | Maximum OCR service request time | `90` |
-| `PADDLEOCR_CONTAINER_ENABLE_MKLDNN` | Linux container oneDNN acceleration toggle | `true` in Compose |
+| `PADDLEOCR_CONTAINER_ENABLE_MKLDNN` | Container oneDNN acceleration toggle; disabled by default for Paddle 3.3 model compatibility | `false` in Compose |
 | `TRANSLATION_PROVIDER` | `mymemory` or `libretranslate` | `mymemory` |
 | `MYMEMORY_URL` | Temporary no-key translation endpoint | MyMemory public API |
 | `LIBRETRANSLATE_URL` | Base URL for a self-hosted replacement | `http://127.0.0.1:5000` |

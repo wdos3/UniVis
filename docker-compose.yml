@@ -7,8 +7,10 @@ services:
       PADDLE_PDX_MODEL_SOURCE: ${PADDLE_PDX_MODEL_SOURCE:-BOS}
       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: ${PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK:-true}
       PADDLEOCR_CPU_THREADS: ${PADDLEOCR_CPU_THREADS:-8}
-      PADDLEOCR_ENABLE_MKLDNN: ${PADDLEOCR_CONTAINER_ENABLE_MKLDNN:-true}
+      PADDLEOCR_ENABLE_MKLDNN: ${PADDLEOCR_CONTAINER_ENABLE_MKLDNN:-false}
       PADDLEOCR_SERVICE_TOKEN: ${PADDLEOCR_SERVICE_TOKEN:-local-dev-ocr-token}
+    volumes:
+      - paddle_models:/root/.paddlex
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -40,3 +42,6 @@ services:
       - backend
     ports:
       - "5174:80"
+
+volumes:
+  paddle_models:

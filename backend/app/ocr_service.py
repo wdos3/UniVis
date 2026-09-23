@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -33,6 +34,7 @@ class OcrResponse(BaseModel):
 
 
 app = FastAPI(title="UniVis PaddleOCR Service", version="1.0.0")
+logger = logging.getLogger("univis.ocr")
 
 
 def _configured_token() -> str:
@@ -80,8 +82,10 @@ async def ocr(
     try:
         result = await PaddleOcrProvider().extract_bytes(image_bytes)
     except OcrError as exc:
+        logger.warning("ocr_request_failed reason=%s", str(exc))
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("ocr_request_failed_unexpected")
         raise HTTPException(status_code=502, detail="PaddleOCR could not complete the recognition request.") from exc
 
     return OcrResponse(
