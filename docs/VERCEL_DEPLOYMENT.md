@@ -29,9 +29,10 @@ appropriate). Never commit `.env` or secret values.
 The repository's local runtime installs PaddleOCR and PaddlePaddle from
 `backend/requirements.txt`. The Vercel function intentionally leaves those
 large native packages out because their bundle exceeds Vercel's 500 MB
-function limit. As a result, the hosted branch supports the demos, text/PDF
-text flows, translation, and semantic rendering; image OCR remains available
-when running the same branch locally (or on a container host). The health
+function limit. As a result, the hosted branch supports the demos, text-file
+flows, translation, and semantic rendering; PaddleOCR and image-only PDF
+handling remain available when running the same branch locally (or on a
+container host). The health
 endpoint reports `paddleocr-local-unavailable-on-vercel` instead of claiming
 that hosted image OCR is ready. This keeps the public prototype honest while
 the deployment architecture is evaluated.

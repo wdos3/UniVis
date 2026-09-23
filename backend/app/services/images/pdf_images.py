@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import fitz
-
 from app.services.pdf import DocumentExtractionError
 
 
 def render_pdf_pages(data: bytes, max_pages: int = 12) -> list[tuple[bytes, str]]:
     try:
+        import fitz
+
         document = fitz.open(stream=data, filetype="pdf")
+    except ImportError as exc:
+        raise DocumentExtractionError("Image-only PDF rendering is not installed in this deployment. Use the local/container runtime.") from exc
     except Exception as exc:
         raise DocumentExtractionError("The PDF could not be opened. It may be damaged or encrypted.") from exc
     try:

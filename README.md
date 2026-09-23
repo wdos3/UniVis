@@ -85,9 +85,9 @@ deployment serves the Vite frontend and rewrites the FastAPI routes through
 the Vercel project environment; never commit `.env` or secret values. The
 local runtime still uses PaddleOCR, but Vercel intentionally omits its large
 native packages because they exceed Vercel's function bundle limit. Therefore
-the hosted prototype is suitable for demos, text/PDF-text flows, translation,
-and semantic rendering; image OCR should be run locally or on a container
-host. Vercel's temporary function filesystem also means uploads and SQLite
+the hosted prototype is suitable for demos, text-file flows, translation, and
+semantic rendering; image OCR and image-only PDF handling should be run locally
+or on a container host. Vercel's temporary function filesystem also means uploads and SQLite
 study data are not durable across cold starts. See [the deployment notes](docs/VERCEL_DEPLOYMENT.md)
 before treating this branch as production-ready.
 
