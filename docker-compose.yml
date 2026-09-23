@@ -1,0 +1,19 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: .env
+    volumes:
+      - ./data:/data
+    environment:
+      VISNOTICE_DB_PATH: /data/visnotice.db
+      CORS_ORIGINS: http://localhost:5174
+    ports:
+      - "8001:8000"
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "5174:80"

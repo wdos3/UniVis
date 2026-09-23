@@ -1,0 +1,1 @@
+"""VisNotice backend package."""
