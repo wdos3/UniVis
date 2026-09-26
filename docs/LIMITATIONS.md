@@ -42,7 +42,7 @@ The included answer scorer is intentionally simple and can misclassify synonymou
 
 ## Privacy and deployment
 
-Local SQLite and source-image storage have no authentication or encryption. Originals and processed copies remain under `data/uploads` until manually removed; there is no retention scheduler. Do not expose the prototype directly to the public internet. Images stay local, but OCR text is sent to the configured translation service and Korean plus translated text is sent to the semantic provider. Researchers must assess both providers' terms and institutional data-handling requirements before using sensitive material.
+SQLite and source-image storage have no user-account authentication or encryption. Originals and processed copies remain under `data/uploads` (or the cloud data volume) until manually removed; there is no retention scheduler. Public mode disables global notice browsing, editing, reprocessing, and study CSV export without a server-side administrator token, but uploaded images and results still persist on the backend and image URLs are accessible to anyone who obtains them. Do not submit private notices to the public deployment. OCR text is sent to the configured translation service and Korean plus translated text is sent to the semantic provider. Researchers must assess both providers' terms and institutional data-handling requirements before using sensitive material.
 
 ## Deferred work
 

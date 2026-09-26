@@ -14,8 +14,9 @@ upgraded. Choose only an **Always Free** shape and stay within its quota.
 ## Prepare the VM
 
 1. Create an Ubuntu 24.04 Ampere A1 VM with **2 OCPUs and 12 GB RAM** in the
-   account's home region. Use a reserved public IPv4 address if available.
-   Capacity can be temporarily unavailable in some regions.
+   account's home region and an Always Free-eligible boot volume (the default
+   50 GB is within the 200 GB total free storage quota). Assign a public IPv4
+   address. Capacity can be temporarily unavailable in some regions.
 2. Add an SSH public key during instance creation. Keep the private key on
    your own computer.
 3. Allow inbound TCP 80 and 443 in the OCI security list or network security
@@ -38,6 +39,10 @@ Copy `.env.cloud.example` to `.env.cloud` on the VM. Set:
 - `PADDLEOCR_SERVICE_TOKEN` to a fresh random 32-byte or longer secret. Only
   the API container can reach the OCR container; the token is additional
   protection.
+- Optionally set `VISNOTICE_ADMIN_TOKEN` to a separate long random secret if
+  researcher administration is needed. Keep it server-side; public browsers
+  must not receive it. Without it, global notice listing, editing,
+  reprocessing, and study CSV export are disabled in public mode.
 - `API_HOST` to a hostname resolving to the VM's public IP. An owned DNS name
   is preferred. For a test without a domain, an IP-based hostname such as
   `203-0-113-42.sslip.io` can be used for public IP `203.0.113.42`.
@@ -75,14 +80,25 @@ deploy this branch to the existing Vercel project. The browser can continue
 using same-origin URLs. Vercel's external proxy has a 120-second wait for the
 upstream response, so benchmark a real photo through the Vercel URL too.
 
+In the Vercel dashboard, set Project Settings → Environments → Production →
+Branch Tracking to `prototype/paddleocr-gpt41mini`. The current linked project
+still tracks `main`, so changing this setting is necessary for future pushes
+to this prototype branch to deploy automatically.
+
 ## Operational limits
 
 - This free VM has only 2 OCPUs. OCR latency will likely differ from the local
   8-thread benchmark; measure before promising an interaction time.
-- The API endpoints are public once the Vercel site is public. Put an OpenAI
-  spending limit in place before inviting unrestricted traffic.
-- The prototype currently has no account-based separation for saved notices
-  and research results. Do not process private notices until that is added.
+- Oracle may reclaim an Always Free instance that meets its idle criteria for
+  seven days. This option cannot guarantee uninterrupted hosting; back up
+  the data volume and be prepared to recreate the instance if necessary.
+- Anonymous analysis still spends the configured OpenAI key. Set an OpenAI
+  project budget and monitor usage before inviting unrestricted traffic.
+- Public mode blocks global notice browsing, mutation, and study CSV export
+  unless a server-side administrator token is supplied. It is not user-account
+  isolation: submitted images and results persist on the VM, and image URLs are
+  accessible to anyone who obtains a result URL. Do not process private
+  notices until authentication, encryption, and retention controls are added.
 - Keep the VM, Docker, and images patched, and back up the data volume if
   saved results matter.
 

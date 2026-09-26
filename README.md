@@ -125,19 +125,21 @@ Copy `.env.example` to `.env`. `OPENAI_API_KEY` is required only for arbitrary s
 | `TRANSLATION_CONCURRENCY` | Concurrent MyMemory chunk requests | `4` |
 | `CORS_ORIGINS` | Allowed frontend origins | `http://localhost:5174` |
 | `VISNOTICE_DB_PATH` | SQLite file path | project `visnotice.db` |
+| `VISNOTICE_PUBLIC_MODE` | Disable unauthenticated researcher routes and limit anonymous analyses | unset (automatically enabled on Vercel) |
+| `VISNOTICE_ADMIN_TOKEN` | Optional server-side token for researcher routes in public mode | unset |
 | `LOG_LEVEL` | Structured development log level | `INFO` |
 
-With no key, the app starts in mock mode and explains that arbitrary real notices cannot be interpreted. All bundled text and image demos remain fully functional.
+With no key, the app starts in mock mode and explains that arbitrary real notices cannot be interpreted. Bundled text demos remain available; image demos require a working OCR runtime.
 
 ## Typical workflow
 
 1. Select **Take a Photo**, **Upload Image**, **Upload PDF**, or **Paste Korean text**.
 2. Preview image pages, add/remove pages, and put them in reading order.
 3. Select Auto, Mock, or OpenAI for the semantic step and analyze the notice.
-4. For image input, inspect original pages, quality warnings, QR results, and locally recovered Korean text.
+4. For image input, inspect original pages, quality warnings, QR results, and OCR-recovered Korean text.
 5. Inspect Translation, Simplified Text, and Visual Instructions.
 6. Turn on **Show source evidence** to compare English items with Korean phrases, fact IDs, and source pages.
-7. Correct recovered text or use **Researcher View** for structured-data/template corrections.
+7. In local development, correct recovered text or use **Researcher View** for structured-data/template corrections. These controls are not offered on the public website.
 8. Use **Print / Save PDF** for a clean student-facing export.
 
 Image-only PDFs are rendered and processed by local OCR. An unreadable source is rejected instead of producing plausible instructions.
@@ -207,4 +209,4 @@ visnotice-v2/
 
 ## Safety and limitations
 
-Generated output can be wrong and must not replace an official university notice. OCR may misread photographs, free machine translation may mistranslate administrative language, and semantic analysis may omit qualifications. Quality detection is heuristic and icons can differ culturally. Images stay local; extracted text is sent to the configured translation service, and the Korean plus translated text is sent to OpenAI for one semantic request. Paddle's model files are fetched on first live use, but notice images are not sent to Paddle. Originals and processed copies are stored locally for evidence review; the prototype has no retention scheduler. It stores processed notices and non-identifying study responses in SQLite and does not collect accounts, names, or participant email addresses.
+Generated output can be wrong and must not replace an official university notice. OCR may misread photographs, free machine translation may mistranslate administrative language, and semantic analysis may omit qualifications. Quality detection is heuristic and icons can differ culturally. Uploaded images are sent to this application's backend (and its configured OCR container), where originals and processed copies are stored for evidence review; they are not sent to OpenAI. Extracted text is sent to the configured translation service, and Korean plus translated text is sent to OpenAI for one semantic request. The prototype has no retention scheduler. It stores processed notices and study responses in SQLite and does not collect account credentials, names, or participant email addresses. Do not submit private notices to the public deployment.

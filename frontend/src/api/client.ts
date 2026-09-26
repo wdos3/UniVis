@@ -10,7 +10,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<{ status: string; openai_configured: boolean; default_provider: string }>('/api/health'),
+  health: () => request<{ status: string; openai_configured: boolean; default_provider: string; ocr_provider: string; public_mode: boolean }>('/api/health'),
   demos: () => request<DemoSummary[]>('/api/demos'),
   imageDemos: () => request<ImageDemoSummary[]>('/api/image-demos'),
   demo: (id: string) => request<AnalysisResult>(`/api/demos/${id}`),

@@ -39,6 +39,8 @@ services:
       PADDLEOCR_SERVICE_TOKEN: ${PADDLEOCR_SERVICE_TOKEN:?Set PADDLEOCR_SERVICE_TOKEN in .env.cloud}
       PADDLEOCR_SERVICE_TIMEOUT_SECONDS: ${PADDLEOCR_SERVICE_TIMEOUT_SECONDS:-90}
       VISNOTICE_DB_PATH: /data/visnotice.db
+      VISNOTICE_PUBLIC_MODE: "1"
+      VISNOTICE_ADMIN_TOKEN: ${VISNOTICE_ADMIN_TOKEN:-}
       CORS_ORIGINS: https://univis-v2-prototype.vercel.app
     volumes:
       - univis_data:/data

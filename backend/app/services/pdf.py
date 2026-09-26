@@ -15,6 +15,8 @@ def extract_pdf(data: bytes) -> str:
         raise DocumentExtractionError("The PDF could not be opened. It may be damaged or encrypted.") from exc
 
     try:
+        if document.page_count > 12:
+            raise DocumentExtractionError("The PDF has more than the 12-page prototype limit.")
         text = "\n".join(page.get_text("text") for page in document).strip()
     finally:
         document.close()

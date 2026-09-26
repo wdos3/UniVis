@@ -10,7 +10,7 @@ function normalize(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9가-힣]/g, '')
 }
 
-export function ResearchMode({ result, questions, onExit }: { result: AnalysisResult; questions: DemoQuestion[]; onExit: () => void }) {
+export function ResearchMode({ result, questions, publicMode, onExit }: { result: AnalysisResult; questions: DemoQuestion[]; publicMode: boolean; onExit: () => void }) {
   const [participantId, setParticipantId] = useState('')
   const [condition, setCondition] = useState<Condition>('A')
   const [started, setStarted] = useState(false)
@@ -66,10 +66,10 @@ export function ResearchMode({ result, questions, onExit }: { result: AnalysisRe
     </section>
   </main>
 
-  if (saved) return <main className="research-setup page-shell"><section className="setup-card success-state"><CheckCircle2 size={42} /><h1>Response recorded</h1><p>The study result was stored locally.</p><a className="secondary-button" href="/api/research/results.csv" download><Download size={16} />Export Study Results CSV</a><button className="text-button centered" onClick={onExit}>Return to workspace</button></section></main>
+  if (saved) return <main className="research-setup page-shell"><section className="setup-card success-state"><CheckCircle2 size={42} /><h1>Response recorded</h1><p>The study result was saved on this site's server.</p>{!publicMode && <a className="secondary-button" href="/api/research/results.csv" download><Download size={16} />Export Study Results CSV</a>}<button className="text-button centered" onClick={onExit}>Return to workspace</button></section></main>
 
   return <main className="research-session page-shell">
-    <header className="session-header"><div><span>Participant {participantId}</span><strong>Condition {condition}</strong></div><span className="privacy-chip">No name or email collected</span></header>
+    <header className="session-header"><div><span>Participant {participantId}</span><strong>Condition {condition}</strong></div><span className="privacy-chip">Study responses are saved on the server</span></header>
     <section className="condition-output" aria-label={`Condition ${condition}`}>
       {condition === 'A' && <article className="reading-condition"><span className="condition-label">University notice · English translation</span><h1>{result.notice.title}</h1><div className="prose-output">{result.faithful_translation}</div></article>}
       {condition === 'B' && <article className="reading-condition"><span className="condition-label">University notice · Simplified English</span><h1>{result.notice.title}</h1><div className="prose-output simplified-output">{result.simplified_text}</div></article>}

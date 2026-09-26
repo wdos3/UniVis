@@ -9,7 +9,10 @@ from PIL import Image
 import pytest
 
 from app.services.extraction.reconciliation import reconcile_text_sources
-from app.services.images.preprocessing import prepare_image
+from app.services.images import preprocessing
+from app.services.images.pdf_images import render_pdf_pages
+from app.services.images.preprocessing import ImageProcessingError, prepare_image
+from app.services.pdf import DocumentExtractionError, extract_pdf
 
 
 DEMO_IMAGES = Path(__file__).resolve().parents[2] / "demo_data" / "images"
@@ -96,6 +99,33 @@ def test_exif_rotation_is_applied() -> None:
     prepared = prepare_image(buffer.getvalue(), "rotated.jpg", "image/jpeg", "test-exif", 1)
     assert prepared.page.width == 800
     assert prepared.page.height == 1200
+
+
+def test_oversized_pixel_area_is_rejected_before_decoding(monkeypatch: pytest.MonkeyPatch) -> None:
+    image = Image.new("RGB", (200, 200), "white")
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    monkeypatch.setattr(preprocessing, "MAX_IMAGE_PIXELS", 10_000)
+
+    with pytest.raises(ImageProcessingError, match="too many pixels"):
+        prepare_image(buffer.getvalue(), "wide.png", "image/png", "test-large", 1)
+
+
+def test_pdf_page_count_and_rendered_area_are_bounded() -> None:
+    many_pages = fitz.open()
+    for _ in range(13):
+        many_pages.new_page()
+    many_page_bytes = many_pages.tobytes()
+    many_pages.close()
+    with pytest.raises(DocumentExtractionError, match="12-page"):
+        extract_pdf(many_page_bytes)
+
+    large_page = fitz.open()
+    large_page.new_page(width=5000, height=5000)
+    large_page_bytes = large_page.tobytes()
+    large_page.close()
+    with pytest.raises(DocumentExtractionError, match="too large"):
+        render_pdf_pages(large_page_bytes)
 
 
 def test_qr_code_is_detected(client: TestClient) -> None:

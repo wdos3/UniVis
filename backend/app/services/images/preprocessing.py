@@ -24,6 +24,9 @@ class ImageProcessingError(ValueError):
     pass
 
 
+MAX_IMAGE_PIXELS = 40_000_000
+
+
 def upload_root() -> Path:
     if os.getenv("VERCEL") == "1":
         path = Path("/tmp/visnotice-v2") / "uploads"
@@ -43,7 +46,11 @@ def _safe_suffix(filename: str, media_type: str) -> str:
 def prepare_image(data: bytes, filename: str, media_type: str, analysis_id: str, page_number: int) -> PreparedImage:
     try:
         with Image.open(io.BytesIO(data)) as source:
+            if source.width * source.height > MAX_IMAGE_PIXELS:
+                raise ImageProcessingError(f"{filename} has too many pixels to process.")
             image = ImageOps.exif_transpose(source).convert("RGB")
+    except ImageProcessingError:
+        raise
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ImageProcessingError(f"{filename} is not a readable image.") from exc
 

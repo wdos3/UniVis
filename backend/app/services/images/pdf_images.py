@@ -3,6 +3,9 @@ from __future__ import annotations
 from app.services.pdf import DocumentExtractionError
 
 
+MAX_RENDERED_PAGE_PIXELS = 40_000_000
+
+
 def render_pdf_pages(data: bytes, max_pages: int = 12) -> list[tuple[bytes, str]]:
     try:
         import fitz
@@ -18,6 +21,8 @@ def render_pdf_pages(data: bytes, max_pages: int = 12) -> list[tuple[bytes, str]
         pages: list[tuple[bytes, str]] = []
         matrix = fitz.Matrix(2, 2)
         for index, page in enumerate(document):
+            if page.rect.width * 2 * page.rect.height * 2 > MAX_RENDERED_PAGE_PIXELS:
+                raise DocumentExtractionError(f"Page {index + 1} is too large to render safely.")
             pixmap = page.get_pixmap(matrix=matrix, alpha=False)
             pages.append((pixmap.tobytes("png"), f"pdf-page-{index + 1}.png"))
         return pages

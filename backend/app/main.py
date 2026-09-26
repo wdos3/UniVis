@@ -10,7 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,6 +34,7 @@ from app.services.images.pdf_images import render_pdf_pages
 from app.services.images.preprocessing import ImageProcessingError, prepare_image, upload_root
 from app.services.pdf import DocumentExtractionError, extract_pdf
 from app.services.pipeline import PipelineResult, analyze_image_pipeline, analyze_text_pipeline
+from app.services.public_access import limit_public_analysis, public_mode, require_admin
 from app.services.ocr import OcrError
 from app.services.semantic import SemanticError
 from app.services.storage import (
@@ -53,6 +54,8 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("visnotice")
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+MAX_TOTAL_IMAGE_BYTES = 50 * 1024 * 1024
 
 
 @asynccontextmanager
@@ -90,7 +93,7 @@ def make_result(
     if validation_warnings:
         notice.unverified_items = list(dict.fromkeys(notice.unverified_items + validation_warnings))
     return AnalysisResult(
-        id=result_id or f"notice-{uuid4().hex[:12]}",
+        id=result_id or f"notice-{uuid4().hex}",
         created_at=created_at or datetime.now(UTC).isoformat(),
         original_text=original_text,
         faithful_translation=translation,
@@ -181,6 +184,7 @@ def health() -> dict[str, object]:
         "translation_provider": os.getenv("TRANSLATION_PROVIDER", "mymemory"),
         "ocr_provider": ocr_provider,
         "semantic_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        "public_mode": public_mode(),
     }
 
 
@@ -202,7 +206,7 @@ def image_demos() -> list[ImageDemoSummary]:
     return IMAGE_DEMOS
 
 
-@app.post("/api/analyze", response_model=AnalysisResult)
+@app.post("/api/analyze", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])
 async def analyze_text(request: AnalyzeRequest) -> AnalysisResult:
     return await analyze(request)
 
@@ -272,9 +276,9 @@ async def prepare_uploads(files: list[UploadFile], analysis_id: str):
         suffix = Path(file.filename or "").suffix.lower()
         if suffix not in allowed:
             raise HTTPException(status_code=415, detail=f"{file.filename or 'The file'} is not a supported JPG, PNG, WEBP, HEIC, or HEIF image.")
-        data = await file.read()
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
         total_size += len(data)
-        if len(data) > 15 * 1024 * 1024 or total_size > 50 * 1024 * 1024:
+        if len(data) > MAX_UPLOAD_BYTES or total_size > MAX_TOTAL_IMAGE_BYTES:
             raise HTTPException(status_code=413, detail="Images exceed the 15 MB per-page or 50 MB total prototype limit.")
         try:
             prepared.append(prepare_image(data, file.filename or f"page-{page_number}{suffix}", file.content_type or "application/octet-stream", analysis_id, page_number))
@@ -283,7 +287,7 @@ async def prepare_uploads(files: list[UploadFile], analysis_id: str):
     return prepared
 
 
-@app.post("/api/analyze-images", response_model=AnalysisResult)
+@app.post("/api/analyze-images", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])
 async def analyze_images(
     files: list[UploadFile] = File(...),
     target_language: str = Form("en"),
@@ -292,18 +296,18 @@ async def analyze_images(
 ) -> AnalysisResult:
     if input_type not in {"camera_photo", "uploaded_image"}:
         raise HTTPException(status_code=422, detail="Image input type must be camera_photo or uploaded_image.")
-    analysis_id = f"image-{uuid4().hex[:12]}"
+    analysis_id = f"image-{uuid4().hex}"
     prepared = await prepare_uploads(files, analysis_id)
     return await analyze_prepared_images(prepared, provider, target_language, input_type)
 
 
-@app.post("/api/upload", response_model=AnalysisResult)
+@app.post("/api/upload", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])
 async def analyze_upload(file: UploadFile = File(...), target_language: str = Form("en"), provider: str = Form("auto")) -> AnalysisResult:
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in {".pdf", ".txt"}:
         raise HTTPException(status_code=415, detail="Only .pdf and .txt files are supported.")
-    data = await file.read()
-    if len(data) > 15 * 1024 * 1024:
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="The file exceeds the 15 MB prototype limit.")
     try:
         if suffix == ".pdf":
@@ -312,7 +316,7 @@ async def analyze_upload(file: UploadFile = File(...), target_language: str = Fo
             except DocumentExtractionError:
                 supplemental_text = ""
             if not supplemental_text:
-                analysis_id = f"pdf-{uuid4().hex[:12]}"
+                analysis_id = f"pdf-{uuid4().hex}"
                 rendered = render_pdf_pages(data)
                 source_stem = Path(file.filename or "notice").stem
                 prepared = [prepare_image(page_data, f"{source_stem}-{filename}", "image/png", analysis_id, index) for index, (page_data, filename) in enumerate(rendered, start=1)]
@@ -334,12 +338,12 @@ def rerender(notice: NoticeData) -> AnalysisResult:
     return make_result("", "", notice, "manual-edit")
 
 
-@app.get("/api/notices", response_model=list[AnalysisResult])
+@app.get("/api/notices", response_model=list[AnalysisResult], dependencies=[Depends(require_admin)])
 def notice_index() -> list[AnalysisResult]:
     return list_notices()
 
 
-@app.put("/api/notices/{notice_id}", response_model=AnalysisResult)
+@app.put("/api/notices/{notice_id}", response_model=AnalysisResult, dependencies=[Depends(require_admin)])
 def update_notice(notice_id: str, notice: NoticeData) -> AnalysisResult:
     existing = get_notice(notice_id)
     if not existing:
@@ -360,7 +364,7 @@ def update_notice(notice_id: str, notice: NoticeData) -> AnalysisResult:
     return updated
 
 
-@app.post("/api/notices/{notice_id}/reprocess-recovered-text", response_model=AnalysisResult)
+@app.post("/api/notices/{notice_id}/reprocess-recovered-text", response_model=AnalysisResult, dependencies=[Depends(require_admin)])
 async def reprocess_recovered_text(notice_id: str, update: RecoveredTextUpdate) -> AnalysisResult:
     existing = get_notice(notice_id)
     if not existing or not existing.source_pages:
@@ -402,7 +406,7 @@ def create_research_result(result: ResearchResultCreate) -> dict[str, int]:
     return {"id": save_research_result(result)}
 
 
-@app.get("/api/research/results.csv", response_class=PlainTextResponse)
+@app.get("/api/research/results.csv", response_class=PlainTextResponse, dependencies=[Depends(require_admin)])
 def research_results_csv() -> PlainTextResponse:
     return PlainTextResponse(
         export_research_csv(),

@@ -73,6 +73,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .capture-intro h3 { font-family: Georgia, serif; font-size: 1.45rem; font-weight: 500; margin: 6px 0 5px; }
 .capture-intro p { color: var(--muted); font-size: .82rem; margin: 0; }
 .capture-intro > svg { color: var(--green); }
+.ocr-status { margin-top: 18px; padding: 12px 14px; border: 1px solid #efc2ae; border-radius: 8px; color: #87361d; background: var(--orange-soft); font-size: .82rem; line-height: 1.5; }
+.ocr-status strong { display: block; }
 .capture-actions { display: grid; grid-template-columns: 1.2fr 1fr; gap: 12px; margin-top: 20px; }
 .camera-button, .image-upload-button { min-height: 78px; border-radius: 10px; display: flex; align-items: center; gap: 13px; text-align: left; padding: 14px 18px; }
 .camera-button { border: 1px solid var(--green); color: white; background: var(--green); box-shadow: 0 8px 22px rgba(23,107,91,.18); }
