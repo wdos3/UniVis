@@ -7,7 +7,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY ocr_service/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN if [ "$(uname -m)" = "aarch64" ]; then \
+      pip install --no-cache-dir paddlepaddle==3.3.1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/; \
+    fi \
+    && pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app ./app
 

@@ -99,6 +99,10 @@ before treating this branch as production-ready.
 
 ## API configuration
 
+For a no-charge Arm VM deployment with persistent OCR and API containers, see
+[the OCI Always Free guide](docs/OCI_ALWAYS_FREE_DEPLOYMENT.md). The Vercel site
+alone cannot run real PaddleOCR photo analysis.
+
 Copy `.env.example` to `.env`. `OPENAI_API_KEY` is required only for arbitrary semantic analysis. Keys are read from the environment, never persisted, returned to the client, or logged.
 
 | Variable | Purpose | Default |

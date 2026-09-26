@@ -1,0 +1,66 @@
+services:
+  ocr:
+    build:
+      context: .
+      dockerfile: ocr_service/Dockerfile
+    environment:
+      PADDLE_PDX_MODEL_SOURCE: BOS
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
+      PADDLEOCR_CPU_THREADS: ${PADDLEOCR_CPU_THREADS:-2}
+      PADDLEOCR_ENABLE_MKLDNN: "false"
+      PADDLEOCR_SERVICE_TOKEN: ${PADDLEOCR_SERVICE_TOKEN:?Set PADDLEOCR_SERVICE_TOKEN in .env.cloud}
+    volumes:
+      - paddle_models:/root/.paddlex
+    command:
+      - /bin/sh
+      - -c
+      - python -c 'from app.services.images.paddle_ocr import get_paddle_engine; get_paddle_engine()' && exec uvicorn app.ocr_service:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 180s
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.api
+    depends_on:
+      ocr:
+        condition: service_healthy
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env.cloud}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      TRANSLATION_PROVIDER: mymemory
+      TRANSLATION_CONCURRENCY: ${TRANSLATION_CONCURRENCY:-4}
+      PADDLEOCR_SERVICE_URL: http://ocr:8000
+      PADDLEOCR_SERVICE_TOKEN: ${PADDLEOCR_SERVICE_TOKEN:?Set PADDLEOCR_SERVICE_TOKEN in .env.cloud}
+      PADDLEOCR_SERVICE_TIMEOUT_SECONDS: ${PADDLEOCR_SERVICE_TIMEOUT_SECONDS:-90}
+      VISNOTICE_DB_PATH: /data/visnotice.db
+      CORS_ORIGINS: https://univis-v2-prototype.vercel.app
+    volumes:
+      - univis_data:/data
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10-alpine
+    depends_on:
+      - backend
+    environment:
+      API_HOST: ${API_HOST:?Set API_HOST in .env.cloud}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  paddle_models:
+  univis_data:
+  caddy_data:
+  caddy_config:
