@@ -1,29 +1,55 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { api } from './api/client'
+import { isBrowserOcrSupported, recognizeImages } from './ocr/browserOcr'
+import type { AnalysisResult, NoticeData } from './types'
 
 vi.mock('./api/client', () => ({
   api: {
-    demos: vi.fn(),
-    imageDemos: vi.fn(),
-    health: vi.fn(),
+    demos: vi.fn(), imageDemos: vi.fn(), demo: vi.fn(), health: vi.fn(), analyzeClientOcr: vi.fn(), notices: vi.fn(), updateNotice: vi.fn(), reprocessRecoveredText: vi.fn(),
   },
 }))
+vi.mock('./ocr/browserOcr', () => ({ isBrowserOcrSupported: vi.fn(), recognizeImages: vi.fn() }))
 
-describe('App availability', () => {
-  afterEach(cleanup)
+const notice: NoticeData = {
+  title: 'Test notice', notice_type: 'Other', audience: [], purpose: '', summary: '',
+  actions: [], deadlines: [], required_documents: [], eligibility: [], exceptions: [], warnings: [],
+  consequences: [], locations: [], contacts: [], fees: [], links: [], conditional_groups: [],
+  source_language: 'ko', target_language: 'en', ambiguities: [], unverified_items: [], source_facts: [],
+  template_overrides: { checklist: null, step_flow: null, timeline: null, decision_tree: null, warning_cards: null, information_cards: null },
+}
+
+const imageResult: AnalysisResult = {
+  id: 'image-result', created_at: '2026-09-29T00:00:00Z', original_text: '공지사항', recovered_text: '공지사항',
+  faithful_translation: 'Notice', simplified_text: 'Notice', provider: 'mock', synthetic: false, korean_detected: true,
+  notice, templates: {},
+  fidelity: { checks: [], warnings: [], critical_fields_in_source: 0, critical_fields_represented: 0, potentially_missing: [], potentially_invented: [], serious_issue: false },
+  source_pages: [{ id: 'page-1', page_number: 1, filename: 'Page 1', media_type: 'application/octet-stream', original_url: '', processed_url: '', width: 1, height: 1, readable: true, quality_issues: [], qr_codes: [] }],
+  acquisition: {
+    input_type: 'uploaded_image', source_pages: 1, text_extraction_status: 'available', quality_warnings: 0,
+    pages_needing_review: 0, critical_facts_needing_review: 0, reconciliation_conflicts: [], ocr_provider: 'browser-ocr-kor-eng',
+    translation_provider: 'mock', semantic_provider: 'mock', translation_requests: 0, semantic_requests: 0,
+    semantic_input_tokens: 0, semantic_output_tokens: 0, semantic_total_tokens: 0,
+    ocr_latency_ms: 1200, translation_latency_ms: 0, semantic_latency_ms: 0, total_latency_ms: 1200,
+  },
+}
+
+describe('App browser OCR', () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
   beforeEach(() => {
     vi.mocked(api.demos).mockResolvedValue([{ id: 'demo', title: 'Synthetic notice', category: 'Example', original_text: '공지', questions: [] }])
     vi.mocked(api.imageDemos).mockResolvedValue([])
+    vi.mocked(isBrowserOcrSupported).mockReturnValue(true)
   })
 
-  it('keeps text and synthetic notices available when hosted OCR is absent', async () => {
+  it('keeps text and synthetic notices available in unsupported browsers', async () => {
+    vi.mocked(isBrowserOcrSupported).mockReturnValue(false)
     vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: false, default_provider: 'mock', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })
     render(<App />)
 
-    expect(await screen.findByText('Photo analysis is unavailable on this website.')).toBeInTheDocument()
+    expect(await screen.findByText('Photo analysis is unavailable in this browser.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Take a Photo/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /Upload text-based PDF or TXT/i })).toBeEnabled()
     expect(await screen.findByRole('button', { name: /Synthetic notice/ })).toBeEnabled()
@@ -33,13 +59,119 @@ describe('App availability', () => {
     expect(screen.getByRole('button', { name: 'Generate instructions' })).toBeEnabled()
   })
 
-  it('enables photo controls and local researcher tools when OCR is configured', async () => {
-    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: true, default_provider: 'openai', ocr_provider: 'paddleocr-ppocrv5-korean-container', public_mode: false })
+  it('enables local photo OCR even when hosted PaddleOCR is absent', async () => {
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: true, default_provider: 'openai', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: false })
     render(<App />)
 
     expect(await screen.findByRole('button', { name: 'Researcher View' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Take a Photo/i })).toBeEnabled()
     expect(screen.getByRole('button', { name: /Upload Image/i })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /Upload PDF or TXT/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /Upload text-based PDF or TXT/i })).toBeEnabled()
+  })
+
+  it('sends recognized text without image bytes and keeps image URLs local', async () => {
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: false, default_provider: 'mock', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })
+    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '공지사항 신청 방법' }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
+    vi.mocked(api.analyzeClientOcr).mockResolvedValue(imageResult)
+    const createUrl = vi.fn().mockReturnValueOnce('blob:draft').mockReturnValueOnce('blob:result')
+    const revokeUrl = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeUrl })
+
+    const { container, unmount } = render(<App />)
+    await screen.findByText('Photos are read on your device.')
+    const file = new File(['private photo bytes'], 'notice.png', { type: 'image/png' })
+    fireEvent.change(container.querySelector('input[multiple]')!, { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+
+    await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenCalledWith([{ text: '공지사항 신청 방법' }], 1200, 'auto', 'uploaded_image'))
+    expect(recognizeImages).toHaveBeenCalledWith([file], expect.any(Function))
+    expect(screen.getByAltText('Original notice page 1')).toHaveAttribute('src', 'blob:result')
+    expect(screen.getByRole('textbox', { name: '' })).toHaveValue('공지사항 신청 방법')
+    expect(createUrl).toHaveBeenCalledWith(file)
+    unmount()
+    expect(revokeUrl).toHaveBeenCalledWith('blob:draft')
+    expect(revokeUrl).toHaveBeenCalledWith('blob:result')
+  })
+
+  it('does not attach photo A to saved notice B when a researcher switches results', async () => {
+    const savedResult: AnalysisResult = {
+      ...imageResult,
+      id: 'saved-B',
+      notice: { ...notice, title: 'Saved B' },
+      source_pages: [{ ...imageResult.source_pages[0], id: 'saved-B-page', original_url: '', processed_url: '' }],
+    }
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: false, default_provider: 'mock', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: false })
+    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '공지사항 신청 방법' }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
+    vi.mocked(api.analyzeClientOcr).mockResolvedValue(imageResult)
+    vi.mocked(api.notices).mockResolvedValue([savedResult])
+    vi.mocked(api.updateNotice).mockResolvedValue(savedResult)
+    vi.mocked(api.reprocessRecoveredText).mockResolvedValue(imageResult)
+    const revokeUrl = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn().mockReturnValueOnce('blob:draft-A').mockReturnValueOnce('blob:result-A') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeUrl })
+
+    const { container } = render(<App />)
+    await screen.findByText('Photos are read on your device.')
+    fireEvent.change(container.querySelector('input[multiple]')!, { target: { files: [new File(['A'], 'photo-A.png', { type: 'image/png' })] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+    expect(await screen.findByAltText('Original notice page 1')).toHaveAttribute('src', 'blob:result-A')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit recovered text' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save & regenerate outputs' }))
+    await waitFor(() => expect(api.reprocessRecoveredText).toHaveBeenCalledWith('image-result', '공지사항', 'auto'))
+    await screen.findByRole('button', { name: 'Edit recovered text' })
+    expect(screen.getByAltText('Original notice page 1')).toHaveAttribute('src', 'blob:result-A')
+    expect(revokeUrl).not.toHaveBeenCalledWith('blob:result-A')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Researcher View' }))
+    fireEvent.click(await screen.findByRole('button', { name: /Saved B/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Validate & regenerate' }))
+    await waitFor(() => expect(api.updateNotice).toHaveBeenCalledWith('saved-B', savedResult.notice))
+    fireEvent.click(screen.getByRole('button', { name: 'Back to workspace' }))
+
+    expect(screen.getByText('This photo was kept on the original device and is no longer available here.')).toBeInTheDocument()
+    expect(screen.queryByAltText('Original notice page 1')).not.toBeInTheDocument()
+    expect(revokeUrl).toHaveBeenCalledWith('blob:result-A')
+    expect(revokeUrl).not.toHaveBeenCalledWith('blob:draft-A')
+  })
+
+  it('does not assign text-demo comprehension questions to an unanalyzed image demo', async () => {
+    vi.mocked(api.demos).mockResolvedValue([{
+      id: 'text-demo', title: 'Synthetic notice', category: 'Example', original_text: '공지',
+      questions: [{ id: 'q1', prompt: 'Which deadline?', expected_answer: 'Monday', critical_fact_id: null }],
+    }])
+    vi.mocked(api.demo).mockResolvedValue({ ...imageResult, source_pages: [], synthetic: true })
+    vi.mocked(api.imageDemos).mockResolvedValue([{ id: 'image-demo', title: 'Image demo', description: 'Poster image', page_urls: ['/demo-images/poster.png'] }])
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: false, default_provider: 'mock', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn().mockReturnValue('blob:demo') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Blob(['image'], { type: 'image/png' }), { status: 200 })))
+
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /Synthetic notice/ }))
+    expect(await screen.findByRole('button', { name: /Open Research Mode/ })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: /Image demo/ }))
+    await screen.findByText('poster.png')
+    expect(screen.queryByRole('button', { name: /Open Research Mode/ })).not.toBeInTheDocument()
+  })
+
+  it('does not leave a previous result visible when mock image OCR cannot be interpreted', async () => {
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: false, default_provider: 'mock', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })
+    vi.mocked(api.demo).mockResolvedValue({ ...imageResult, source_pages: [], synthetic: true })
+    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '공지사항 다른 날짜' }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
+    vi.mocked(api.analyzeClientOcr).mockRejectedValue(new Error('Mock mode requires exact synthetic notice OCR.'))
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn().mockReturnValue('blob:draft') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+
+    const { container } = render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /Synthetic notice/ }))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Test notice' })).toBeInTheDocument()
+    fireEvent.change(container.querySelector('input[multiple]')!, { target: { files: [new File(['B'], 'photo-B.png', { type: 'image/png' })] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+
+    expect(await screen.findByText('Mock mode requires exact synthetic notice OCR.')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 2, name: 'Test notice' })).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '' })).toHaveValue('공지사항 다른 날짜')
   })
 })

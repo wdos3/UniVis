@@ -112,10 +112,10 @@ async def analyze_image_pipeline(images: list[PreparedImage], target_language: s
     semantic_started = perf_counter()
     structured = await semantic.analyze(ocr.text, translation.text, target_language)
     semantic_latency_ms = round((perf_counter() - semantic_started) * 1000)
-    if semantic.name == "mock-semantic" and any(token in " ".join(image.page.filename.lower() for image in images) for token in ("table", "course")):
+    if semantic.name == "mock-semantic" and demo.id == "demo-courses-2027":
         structured.notice.conditional_groups = [
-            ConditionalGroup(group="Enrolled students", application_period="February 15–17, 2027", source_evidence="재학생 2월 15일~17일", source_fact_ids=["F001"], source_page=1),
-            ConditionalGroup(group="New students", application_period="February 19, 2027", source_evidence="신입생 2월 19일", source_fact_ids=["F002"], source_page=1),
+            ConditionalGroup(group="Enrolled students", application_period="February 15–17, 2027", source_evidence=demo.notice.deadlines[0].source_evidence, source_fact_ids=["F001"], source_page=1),
+            ConditionalGroup(group="New students", application_period="February 19, 2027", source_evidence=demo.notice.deadlines[1].source_evidence, source_fact_ids=["F002"], source_page=1),
         ]
     return PipelineResult(
         source_text=ocr.text,

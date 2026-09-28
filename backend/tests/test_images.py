@@ -63,11 +63,11 @@ def test_table_rows_are_not_flattened(client: TestClient) -> None:
     groups = response.json()["notice"]["conditional_groups"]
     assert groups == [
         {
-            "source_evidence": "재학생 2월 15일~17일", "source_fact_ids": ["F001"], "state": "verified", "source_page": 1,
+            "source_evidence": "재학생 신청: 2027년 2월 15일 09:00 ~ 2월 17일 17:00", "source_fact_ids": ["F001"], "state": "verified", "source_page": 1,
             "source_image_id": groups[0]["source_image_id"], "bounding_box": None, "group": "Enrolled students", "application_period": "February 15–17, 2027", "details": "",
         },
         {
-            "source_evidence": "신입생 2월 19일", "source_fact_ids": ["F002"], "state": "verified", "source_page": 1,
+            "source_evidence": "신입생 신청: 2027년 2월 19일 09:00 ~ 17:00", "source_fact_ids": ["F002"], "state": "verified", "source_page": 1,
             "source_image_id": groups[1]["source_image_id"], "bounding_box": None, "group": "New students", "application_period": "February 19, 2027", "details": "",
         },
     ]
@@ -155,6 +155,28 @@ def test_image_only_pdf_is_rendered_and_analyzed_visually(client: TestClient) ->
     result = response.json()
     assert result["acquisition"]["input_type"] == "image_pdf"
     assert result["source_pages"][0]["filename"].startswith("clean-visa-notice-")
+
+
+def test_hosted_scanned_pdf_fails_before_server_ocr(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    document = fitz.open()
+    document.new_page()
+    pdf_data = document.tobytes()
+    document.close()
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.delenv("PADDLEOCR_SERVICE_URL", raising=False)
+
+    def reject_render(_data: bytes):
+        raise AssertionError("The hosted browser-only path must not render PDF images on the server.")
+
+    monkeypatch.setattr("app.main.render_pdf_pages", reject_render)
+    response = client.post(
+        "/api/upload",
+        files={"file": ("scan.pdf", pdf_data, "application/pdf")},
+        data={"provider": "mock"},
+    )
+
+    assert response.status_code == 422
+    assert "Scanned PDFs cannot be analyzed" in response.json()["detail"]
 
 
 def test_manual_recovered_text_correction_reprocesses_notice(client: TestClient) -> None:

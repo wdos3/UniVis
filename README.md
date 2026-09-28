@@ -2,7 +2,7 @@
 
 Version 2 separates the notice pipeline into three replaceable portions:
 
-1. local PaddleOCR with the Korean PP-OCRv5 model recovers Korean text without uploading the image;
+1. PaddleOCR with the Korean PP-OCRv5 model recovers Korean text—locally in Python/Docker, or in the visitor's browser on the hosted site;
 2. MyMemory provides temporary no-key translation (or a configured LibreTranslate instance can replace it);
 3. one OpenAI structured-output request converts the bilingual text into typed visual instructions, which React renders deterministically.
 
@@ -20,10 +20,11 @@ It is designed to test whether visualization helps international students identi
 
 ## What works
 
-- rear-camera capture plus JPG, PNG, WEBP, HEIC/HEIF, text, and PDF upload;
+- rear-camera capture plus JPG, PNG, WEBP, text, and PDF upload (local Python/Docker image API also accepts HEIC/HEIF);
 - ordered multi-image previews, removal, and page reordering;
 - EXIF correction, conservative enhancement, quality screening, QR detection, and image-PDF rendering;
-- local PaddleOCR PP-OCRv5 Korean recognition for photographs and image-only PDFs; images are not sent to OpenAI;
+- PaddleOCR PP-OCRv5 Korean recognition for photographs and image-only PDFs in the local Python/Docker runtime;
+- browser-based PaddleOCR for camera and image uploads on the hosted site, with only recognized text sent to the application API;
 - selectable MyMemory or LibreTranslate adapter plus mock translation for demos;
 - strict Pydantic intermediate representation—models never generate React or HTML;
 - exactly one OpenAI semantic request per live analysis;
@@ -88,20 +89,22 @@ deployment serves the Vite frontend and rewrites the FastAPI routes through
 `api/index.py`. Configure `OPENAI_API_KEY` (and any translation settings) in
 the Vercel project environment; never commit `.env` or secret values. The
 local runtime still uses PaddleOCR, but Vercel intentionally omits its large
-native packages because they exceed Vercel's function bundle limit. Set
-`PADDLEOCR_SERVICE_URL`, `PADDLEOCR_SERVICE_TOKEN`, and
-`PADDLEOCR_SERVICE_TIMEOUT_SECONDS` to forward image OCR to the dedicated
-container; without them, the hosted prototype remains suitable for demos,
-text-file flows, translation, and semantic rendering only. Vercel's temporary
-function filesystem also means uploads and SQLite study data are not durable
-across cold starts. See [the deployment notes](docs/VERCEL_DEPLOYMENT.md)
-before treating this branch as production-ready.
+native packages because they exceed Vercel's function bundle limit. On the
+hosted UI, camera and image files are recognized by PaddleOCR in the browser;
+the API receives ordered OCR text, not photo bytes. This requires a capable
+browser and a first-load download of the OCR models. The local Python/Docker
+image and image-only PDF path remains available. A separate OCR container may
+still be configured with `PADDLEOCR_SERVICE_URL` and its token, but is not
+required for hosted photo input. Vercel's temporary function filesystem also
+means text analyses and SQLite study data are not durable across cold starts.
+See [the deployment notes](docs/VERCEL_DEPLOYMENT.md) before treating this
+branch as production-ready.
 
 ## API configuration
 
-For a no-charge Arm VM deployment with persistent OCR and API containers, see
-[the OCI Always Free guide](docs/OCI_ALWAYS_FREE_DEPLOYMENT.md). The Vercel site
-alone cannot run real PaddleOCR photo analysis.
+For an optional Arm VM deployment with persistent OCR and API containers, see
+[the OCI Always Free guide](docs/OCI_ALWAYS_FREE_DEPLOYMENT.md). The Vercel
+site uses browser PaddleOCR for camera and image uploads instead of requiring a VM.
 
 Copy `.env.example` to `.env`. `OPENAI_API_KEY` is required only for arbitrary semantic analysis. Keys are read from the environment, never persisted, returned to the client, or logged.
 
@@ -142,7 +145,9 @@ With no key, the app starts in mock mode and explains that arbitrary real notice
 7. In local development, correct recovered text or use **Researcher View** for structured-data/template corrections. These controls are not offered on the public website.
 8. Use **Print / Save PDF** for a clean student-facing export.
 
-Image-only PDFs are rendered and processed by local OCR. An unreadable source is rejected instead of producing plausible instructions.
+Image-only PDFs are rendered and processed by local Python/Docker OCR; the hosted
+site's browser OCR currently handles camera and image files, not image-only PDFs.
+An unreadable source is rejected instead of producing plausible instructions.
 
 ## Research Mode
 
@@ -161,9 +166,8 @@ Use **Export Study Results CSV** after submission, or open `/api/research/result
 ```text
 Photo(s) / screenshot / PDF / text
     ↓
-Image preparation + quality / QR checks
-    ↓
-Local PaddleOCR PP-OCRv5 Korean, either in-process or in the dedicated OCR container (or embedded PDF/text input)
+Local image preparation + PaddleOCR PP-OCRv5 Korean (Python/Docker), or
+browser PaddleOCR for hosted camera/image input (or embedded PDF/text input)
     ↓
 Temporary translation provider (MyMemory or LibreTranslate)
     ↓
@@ -189,7 +193,12 @@ npm test
 npm run build
 ```
 
-Backend tests cover image and multi-image upload, page order, image-only PDFs, EXIF rotation, preprocessing, invalid/oversized images, QR extraction, table preservation, exact-value conflicts, conservative provider failure, recovered-text correction, schema validation, fidelity, and CSV export. Frontend tests cover camera capture markup, ordered previews, template rendering, and evidence disclosure.
+Backend tests cover image and multi-image upload, browser-OCR text ingestion,
+page provenance, image-only PDFs, EXIF rotation, preprocessing, invalid/oversized
+images, QR extraction, table preservation, conservative provider failure,
+recovered-text correction, schema validation, fidelity, and CSV export. Frontend
+tests cover camera capture markup, ordered previews, browser OCR integration,
+local-only evidence previews, template rendering, and evidence disclosure.
 
 ## Repository map
 
@@ -209,4 +218,4 @@ visnotice-v2/
 
 ## Safety and limitations
 
-Generated output can be wrong and must not replace an official university notice. OCR may misread photographs, free machine translation may mistranslate administrative language, and semantic analysis may omit qualifications. Quality detection is heuristic and icons can differ culturally. Uploaded images are sent to this application's backend (and its configured OCR container), where originals and processed copies are stored for evidence review; they are not sent to OpenAI. Extracted text is sent to the configured translation service, and Korean plus translated text is sent to OpenAI for one semantic request. The prototype has no retention scheduler. It stores processed notices and study responses in SQLite and does not collect account credentials, names, or participant email addresses. Do not submit private notices to the public deployment.
+Generated output can be wrong and must not replace an official university notice. OCR may misread photographs, free machine translation may mistranslate administrative language, and semantic analysis may omit qualifications. Quality detection is heuristic and icons can differ culturally. The hosted UI's camera/image path runs PaddleOCR in the browser and sends recognized text, not photo bytes, to the application API. The local Python/Docker image path still uploads and stores originals for evidence review. Neither path sends images to OpenAI. Extracted text is sent to the configured translation service, and Korean plus translated text is sent to OpenAI for one semantic request. The prototype has no retention scheduler. It stores processed notices and study responses in SQLite and does not collect account credentials, names, or participant email addresses. Do not submit private notices to the public deployment.

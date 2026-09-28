@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ReviewState(StrEnum):
@@ -227,6 +227,30 @@ class AnalyzeRequest(BaseModel):
     text: str = Field(min_length=1, max_length=200_000)
     target_language: str = "en"
     provider: Literal["auto", "mock", "openai"] = "auto"
+
+
+class ClientOcrPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(max_length=20_000)
+
+
+class ClientOcrRequest(BaseModel):
+    """Only recognized text crosses the wire; image data stays in the browser."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pages: list[ClientOcrPage] = Field(min_length=1, max_length=12)
+    target_language: Literal["en"] = "en"
+    provider: Literal["auto", "mock", "openai"] = "auto"
+    input_type: Literal["camera_photo", "uploaded_image"] = "uploaded_image"
+    ocr_latency_ms: int = Field(ge=0, le=3_600_000)
+
+    @model_validator(mode="after")
+    def limit_recognized_text(self) -> ClientOcrRequest:
+        if sum(len(page.text) for page in self.pages) > 50_000:
+            raise ValueError("Recognized text exceeds the 50,000-character notice limit.")
+        return self
 
 
 class ResearchAnswer(BaseModel):

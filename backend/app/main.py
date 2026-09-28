@@ -18,9 +18,11 @@ from fastapi.staticfiles import StaticFiles
 from app.models import (
     AnalysisResult,
     AnalyzeRequest,
+    ClientOcrRequest,
     DemoSummary,
     ImageAcquisitionReport,
     ImageDemoSummary,
+    ImageQualityIssue,
     NoticeData,
     RecoveredTextUpdate,
     ResearchResultCreate,
@@ -28,7 +30,7 @@ from app.models import (
 )
 from app.services.demos import DEMOS, get_demo, match_demo
 from app.services.fidelity import calculate_fidelity, select_templates
-from app.services.extraction.reconciliation import add_page_provenance
+from app.services.extraction.reconciliation import add_page_provenance, split_recovered_pages
 from app.services.image_demos import IMAGE_DEMOS
 from app.services.images.pdf_images import render_pdf_pages
 from app.services.images.preprocessing import ImageProcessingError, prepare_image, upload_root
@@ -112,15 +114,7 @@ def make_result(
 
 async def analyze(request: AnalyzeRequest) -> AnalysisResult:
     logger.info("analysis_started provider=%s korean_detected=%s", request.provider, appears_korean(request.text))
-    try:
-        pipeline = await analyze_text_pipeline(request.text, request.target_language, request.provider)
-    except (TranslationError, SemanticError) as exc:
-        logger.warning("analysis_failed provider=%s reason=%s", request.provider, type(exc).__name__)
-        status = 422 if "Mock" in str(exc) or "not configured" in str(exc) else 502
-        raise HTTPException(status_code=status, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("analysis_failed provider=%s", request.provider)
-        raise HTTPException(status_code=502, detail="The configured Version 2 pipeline could not complete the analysis.") from exc
+    pipeline = await _run_text_pipeline(request)
     acquisition = _pipeline_acquisition(pipeline, "text")
     result = make_result(
         pipeline.source_text,
@@ -134,6 +128,18 @@ async def analyze(request: AnalyzeRequest) -> AnalysisResult:
     save_notice(result)
     logger.info("analysis_completed notice_id=%s provider=%s semantic_requests=%s semantic_tokens=%s", result.id, pipeline.provider, pipeline.semantic_requests, pipeline.semantic_total_tokens)
     return result
+
+
+async def _run_text_pipeline(request: AnalyzeRequest) -> PipelineResult:
+    try:
+        return await analyze_text_pipeline(request.text, request.target_language, request.provider)
+    except (TranslationError, SemanticError) as exc:
+        logger.warning("analysis_failed provider=%s reason=%s", request.provider, type(exc).__name__)
+        status = 422 if "Mock" in str(exc) or "not configured" in str(exc) else 502
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("analysis_failed provider=%s", request.provider)
+        raise HTTPException(status_code=502, detail="The configured Version 2 pipeline could not complete the analysis.") from exc
 
 
 def _pipeline_acquisition(
@@ -209,6 +215,80 @@ def image_demos() -> list[ImageDemoSummary]:
 @app.post("/api/analyze", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])
 async def analyze_text(request: AnalyzeRequest) -> AnalysisResult:
     return await analyze(request)
+
+
+@app.post("/api/analyze-client-ocr", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])
+async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
+    page_texts = [page.text.strip() for page in request.pages]
+    source_text = "\n\n".join(f"[Page {index}]\n{text}" for index, text in enumerate(page_texts, start=1))
+    if len(re.findall(r"[가-힣]", source_text)) < 4:
+        raise HTTPException(
+            status_code=422,
+            detail="Browser OCR recovered too little Korean text. Retake the photo closer, brighter, and straight-on.",
+        )
+
+    pipeline = await _run_text_pipeline(
+        AnalyzeRequest(text=source_text, target_language=request.target_language, provider=request.provider)
+    )
+    if pipeline.semantic_provider == "mock-semantic":
+        normalized_ocr = re.sub(r"\s+", "", "".join(page_texts))
+        if not any(re.sub(r"\s+", "", demo.original_text) == normalized_ocr for demo in DEMOS):
+            raise HTTPException(
+                status_code=422,
+                detail="Mock analysis cannot interpret an incomplete or real notice photo. Use a bundled synthetic demo or configure the OpenAI semantic provider.",
+            )
+    result_id = f"notice-{uuid4().hex}"
+    pages = [
+        SourcePage(
+            id=f"{result_id}-page-{index}",
+            page_number=index,
+            filename=f"Page {index}",
+            media_type="application/octet-stream",
+            original_url="",
+            processed_url="",
+            width=1,
+            height=1,
+            readable=bool(text),
+            quality_issues=(
+                [] if text else [ImageQualityIssue(code="ocr_empty_page", message="Browser OCR recovered no text from this page.")]
+            ),
+        )
+        for index, text in enumerate(page_texts, start=1)
+    ]
+    add_page_provenance(pipeline.notice, page_texts, pages)
+    blank_pages = [page.page_number for page in pages if not page.readable]
+    warnings = [f"Browser OCR recovered no text from page(s): {', '.join(map(str, blank_pages))}."] if blank_pages else []
+    acquisition = _pipeline_acquisition(
+        pipeline,
+        request.input_type,
+        source_pages=len(pages),
+        quality_warnings=len(blank_pages),
+        pages_needing_review=len(blank_pages),
+        critical_facts_needing_review=sum(fact.critical and fact.state.value == "needs_review" for fact in pipeline.notice.source_facts),
+    ).model_copy(update={
+        "text_extraction_status": "partial" if blank_pages else "available",
+        "ocr_provider": "browser-ocr-kor-eng",
+        "ocr_latency_ms": request.ocr_latency_ms,
+        "total_latency_ms": request.ocr_latency_ms + pipeline.total_latency_ms,
+    })
+    result = make_result(
+        pipeline.source_text,
+        pipeline.translation,
+        pipeline.notice,
+        pipeline.provider,
+        pipeline.warnings + warnings,
+        result_id=result_id,
+        synthetic=pipeline.semantic_provider == "mock-semantic",
+        recovered_text=pipeline.source_text,
+        source_pages=pages,
+        acquisition=acquisition,
+    )
+    save_notice(result)
+    logger.info(
+        "client_ocr_analysis_completed notice_id=%s provider=%s pages=%s semantic_requests=%s semantic_tokens=%s",
+        result.id, pipeline.provider, len(pages), pipeline.semantic_requests, pipeline.semantic_total_tokens,
+    )
+    return result
 
 
 async def analyze_prepared_images(
@@ -316,6 +396,11 @@ async def analyze_upload(file: UploadFile = File(...), target_language: str = Fo
             except DocumentExtractionError:
                 supplemental_text = ""
             if not supplemental_text:
+                if os.getenv("VERCEL") == "1" and not os.getenv("PADDLEOCR_SERVICE_URL", "").strip():
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Scanned PDFs cannot be analyzed on this hosted version. Save each page as an image and use browser OCR, or upload a text-based PDF.",
+                    )
                 analysis_id = f"pdf-{uuid4().hex}"
                 rendered = render_pdf_pages(data)
                 source_stem = Path(file.filename or "notice").stem
@@ -370,30 +455,46 @@ async def reprocess_recovered_text(notice_id: str, update: RecoveredTextUpdate) 
     if not existing or not existing.source_pages:
         raise HTTPException(status_code=404, detail="Image-based notice not found.")
     try:
-        pipeline = await analyze_text_pipeline(update.text, "en", update.provider)
-    except (TranslationError, SemanticError) as exc:
-        status = 422 if "Mock" in str(exc) or "not configured" in str(exc) else 502
-        raise HTTPException(status_code=status, detail=str(exc)) from exc
-    recovered_pages = [page for page in re.split(r"\[Page \d+\]\s*", update.text) if page.strip()]
-    add_page_provenance(pipeline.notice, recovered_pages or [update.text], existing.source_pages)
+        recovered_pages = split_recovered_pages(update.text, len(existing.source_pages))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    normalized_text = (
+        update.text
+        if len(recovered_pages) == 1
+        else "\n\n".join(f"[Page {index}]\n{text}" for index, text in enumerate(recovered_pages, start=1))
+    )
+    if len(normalized_text) > 200_000:
+        raise HTTPException(status_code=413, detail="Corrected text exceeds the 200,000-character notice limit.")
+    pipeline = await _run_text_pipeline(AnalyzeRequest(text=normalized_text, target_language="en", provider=update.provider))
+    add_page_provenance(pipeline.notice, recovered_pages, existing.source_pages)
+    blank_pages = [index for index, text in enumerate(recovered_pages, start=1) if not text]
+    warnings = [f"Recovered text remains empty on page(s): {', '.join(map(str, blank_pages))}."] if blank_pages else []
     acquisition = _pipeline_acquisition(
         pipeline,
         existing.acquisition.input_type,
         source_pages=len(existing.source_pages),
         quality_warnings=existing.acquisition.quality_warnings,
-        pages_needing_review=existing.acquisition.pages_needing_review,
+        pages_needing_review=sum(
+            not text or not page.readable or bool(page.quality_issues)
+            for text, page in zip(recovered_pages, existing.source_pages)
+        ),
         critical_facts_needing_review=sum(fact.critical and fact.state.value == "needs_review" for fact in pipeline.notice.source_facts),
-    ).model_copy(update={"ocr_provider": existing.acquisition.ocr_provider, "text_extraction_status": "available"})
+    ).model_copy(update={
+        "ocr_provider": existing.acquisition.ocr_provider,
+        "ocr_latency_ms": existing.acquisition.ocr_latency_ms,
+        "text_extraction_status": "partial" if blank_pages else "available",
+        "total_latency_ms": existing.acquisition.ocr_latency_ms + pipeline.total_latency_ms,
+    })
     result = make_result(
-        update.text,
+        normalized_text,
         pipeline.translation,
         pipeline.notice,
         pipeline.provider,
-        pipeline.warnings,
+        pipeline.warnings + warnings,
         result_id=existing.id,
         created_at=existing.created_at,
         synthetic=existing.synthetic,
-        recovered_text=update.text,
+        recovered_text=normalized_text,
         source_pages=existing.source_pages,
         acquisition=acquisition,
     )

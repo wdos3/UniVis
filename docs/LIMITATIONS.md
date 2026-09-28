@@ -18,9 +18,16 @@ Image-quality detection is heuristic: it can miss glare, cutoff text, perspectiv
 
 PaddleOCR is the primary image-text channel and runs locally with the lightweight PP-OCRv5 Korean recognizer. The first live image analysis needs network access to download the official model weights. PaddleOCR can still confuse similar Hangul glyphs, punctuation, QR-adjacent text, and perspective-distorted lines. Version 2 uses full-page and footer-detail passes and marks low-confidence lines for review; it does not claim reliable word-level bounding boxes. Page-level evidence is the reliable minimum.
 
+The hosted camera/image path runs PaddleOCR in the visitor's browser. First use
+must download the model/runtime assets, and inference depends on the device's
+CPU, memory, and browser support; the 10–15 second target is not guaranteed.
+This browser path currently sends OCR text to the API without the server's
+image-quality and QR checks or bounding boxes. Check the original photo against
+the recovered text before relying on a result.
+
 ## PDF extraction
 
-PyMuPDF handles selectable text but reading order can be wrong in multi-column layouts or tables. Image-only PDFs are rendered into ordered pages and analyzed through local OCR. Password-protected, malformed, and PDFs longer than the prototype page limit may fail. Mock mode can interpret only bundled synthetic image fixtures; arbitrary real notice semantics requires `OPENAI_API_KEY`.
+PyMuPDF handles selectable text but reading order can be wrong in multi-column layouts or tables. Image-only PDFs are rendered into ordered pages and analyzed through local Python/Docker OCR, not the hosted browser-OCR route. On the hosted site, an image-only PDF therefore requires a separately configured OCR container or conversion to image pages first. Password-protected, malformed, and PDFs longer than the prototype page limit may fail. Mock mode can interpret only bundled synthetic image fixtures; arbitrary real notice semantics requires `OPENAI_API_KEY`.
 
 ## Long and composite notices
 
@@ -42,7 +49,7 @@ The included answer scorer is intentionally simple and can misclassify synonymou
 
 ## Privacy and deployment
 
-SQLite and source-image storage have no user-account authentication or encryption. Originals and processed copies remain under `data/uploads` (or the cloud data volume) until manually removed; there is no retention scheduler. Public mode disables global notice browsing, editing, reprocessing, and study CSV export without a server-side administrator token, but uploaded images and results still persist on the backend and image URLs are accessible to anyone who obtains them. Do not submit private notices to the public deployment. OCR text is sent to the configured translation service and Korean plus translated text is sent to the semantic provider. Researchers must assess both providers' terms and institutional data-handling requirements before using sensitive material.
+SQLite and source-image storage have no user-account authentication or encryption. The hosted UI's browser-OCR camera/image path keeps photos on the visitor's device and persists only recognized text/results server-side. The local Python/Docker image API still stores originals and processed copies under `data/uploads` (or the cloud data volume) until manually removed; there is no retention scheduler. Public mode disables global notice browsing, editing, reprocessing, and study CSV export without a server-side administrator token, but stored results and any images uploaded through the legacy API still need protection. Do not submit private notices to the public deployment. OCR text is sent to the configured translation service and Korean plus translated text is sent to the semantic provider. Researchers must assess both providers' terms and institutional data-handling requirements before using sensitive material.
 
 ## Deferred work
 

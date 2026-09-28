@@ -22,7 +22,15 @@ export function AdminView({ current, onExit, onUpdated }: { current: AnalysisRes
     try {
       const parsed = JSON.parse(draft) as NoticeData
       const updated = await api.updateNotice(selected.id, parsed)
-      setSelected(updated); setDraft(JSON.stringify(updated.notice, null, 2)); setSaved(true); setError(''); onUpdated(updated)
+      const withLocalImages = {
+        ...updated,
+        source_pages: updated.source_pages.map((page, index) => ({
+          ...page,
+          original_url: selected.source_pages[index]?.original_url || page.original_url,
+          processed_url: selected.source_pages[index]?.processed_url || page.processed_url,
+        })),
+      }
+      setSelected(withLocalImages); setDraft(JSON.stringify(updated.notice, null, 2)); setSaved(true); setError(''); onUpdated(withLocalImages)
       setNotices((previous) => previous.map((item) => item.id === updated.id ? updated : item))
     } catch (problem) { setSaved(false); setError(problem instanceof Error ? problem.message : 'Could not save changes.') }
   }

@@ -11,11 +11,15 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@paddleocr/paddleocr-js": "0.4.2",
     "@vitejs/plugin-react": "latest",
     "lucide-react": "^0.468.0",
-    "vite": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "vite": "latest"
+  },
+  "overrides": {
+    "onnxruntime-web": "1.24.3"
   },
   "devDependencies": {
     "@eslint/js": "latest",

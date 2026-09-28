@@ -9,6 +9,11 @@ instruction choices are evaluated.
 - `frontend/` is built as the Vite static site.
 - `api/index.py` exposes the existing FastAPI application as a Vercel Python
   function.
+- The hosted camera and image upload path runs PaddleOCR.js with Korean/English
+  PP-OCRv5 models in the visitor's browser. It posts only ordered recognized
+  text to `/api/analyze-client-ocr`; photo bytes and filenames are not sent to
+  that endpoint. The server still sends recognized text to the configured
+  translator and semantic provider.
 - `vercel.json` rewrites `/api/*`, `/uploads/*`, and `/demo-images/*` to that
   function and serves the React single-page app for other routes.
 - Vercel's temporary `/tmp` filesystem is used for prototype uploads and the
@@ -25,15 +30,19 @@ appropriate). Never commit `.env` or secret values.
 - `TRANSLATION_PROVIDER` — defaults to `mymemory`.
 - `CORS_ORIGINS` — optional for cross-origin callers; the hosted UI uses
   same-origin API rewrites.
-- `PADDLEOCR_SERVICE_URL` — HTTPS URL of the separately hosted OCR container.
-- `PADDLEOCR_SERVICE_TOKEN` — server-side shared secret for that container.
-- `PADDLEOCR_SERVICE_TIMEOUT_SECONDS` — OCR request timeout, default `90`.
+- `PADDLEOCR_SERVICE_URL` — optional HTTPS URL of a separately hosted OCR
+  container for direct server-side image routes; not needed for hosted photo UI.
+- `PADDLEOCR_SERVICE_TOKEN` — optional server-side shared secret for that container.
+- `PADDLEOCR_SERVICE_TIMEOUT_SECONDS` — optional OCR request timeout, default `90`.
 
 The repository's local runtime installs PaddleOCR and PaddlePaddle from
 `backend/requirements.txt`. The Vercel function intentionally leaves those
 large native packages out because their bundle exceeds Vercel's 500 MB
-function limit. Configure the three `PADDLEOCR_SERVICE_*` variables above to
-enable image OCR from a separately hosted Docker service. Without that URL,
-the health endpoint reports `paddleocr-local-unavailable-on-vercel` and image
-OCR remains unavailable on Vercel. The browser never receives the container
-token; the FastAPI function forwards image bytes server-side.
+function limit. Browser PaddleOCR is the no-container path for camera and image
+files. On first use it downloads model/runtime assets, then performs inference
+on the visitor's device; performance and browser compatibility must be tested
+on intended phones. A direct call to the legacy server-side image endpoints
+still requires a separately hosted OCR container. Without one, health may
+report `paddleocr-local-unavailable-on-vercel` even while browser OCR works.
+The browser never receives the container token. Image-only PDFs are not yet
+handled by browser OCR on the hosted site; local Python/Docker OCR supports them.

@@ -19,4 +19,13 @@ describe('OriginalImageView editing', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit recovered text' }))
     expect(screen.getByRole('button', { name: 'Save & regenerate outputs' })).toBeEnabled()
   })
+
+  it('explains why a saved browser-OCR result has no image preview', () => {
+    const saved = { ...result, acquisition: { ocr_provider: 'browser-ocr-kor-eng' }, source_pages: [{ id: 'page-1', page_number: 1, filename: 'Page 1', original_url: '', readable: true, quality_issues: [], qr_codes: [] }] } as unknown as AnalysisResult
+    render(<OriginalImageView result={saved} provider="auto" editable={false} onUpdated={vi.fn()} />)
+    expect(screen.getByText('This photo was kept on the original device and is no longer available here.')).toBeInTheDocument()
+    expect(screen.getByText('Text detected; verify against photo')).toBeInTheDocument()
+    expect(screen.queryByText('Readable')).not.toBeInTheDocument()
+    expect(screen.queryByAltText('Original notice page 1')).not.toBeInTheDocument()
+  })
 })
