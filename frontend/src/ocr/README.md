@@ -11,8 +11,8 @@ The two uncompressed model archives in `frontend/public/models/` were downloaded
 
 The PaddleOCR.js worker bundles ONNX Runtime Web 1.24.3, so `package.json`
 pins that transitive version. `frontend/public/ort/` contains the matching
-standard, JSPI, and JSEP `.mjs`/`.wasm` pairs copied from that installed
-package. `browserOcr.ts` passes an absolute same-origin `wasmPaths` URL; a
+JSEP `.mjs`/`.wasm` pair copied from that installed package. The pinned
+PaddleOCR.js worker always loads this pair for its WASM backend. `browserOcr.ts` passes an absolute same-origin `wasmPaths` URL; a
 relative `/ort/` URL caused Vite development-mode module import failures,
 while omitting `wasmPaths` fetched runtime code from a third-party CDN. Keep
 the pinned package and copied files version-matched when upgrading. The copied
