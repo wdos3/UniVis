@@ -45,6 +45,7 @@ async function getEngine(): Promise<OcrEngine> {
       textRecognitionBatchSize: 4,
       ortOptions: {
         backend: 'wasm',
+        wasmPaths: new URL(`${import.meta.env.BASE_URL}ort/`, window.location.origin).href,
         numThreads: 1,
         simd: true,
       },

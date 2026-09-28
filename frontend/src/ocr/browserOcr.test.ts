@@ -53,7 +53,9 @@ describe('browser OCR', () => {
       textRecognitionModelAsset: { url: '/models/korean_PP-OCRv5_mobile_rec_onnx_infer.tar' },
       ortOptions: expect.objectContaining({ backend: 'wasm', numThreads: 1 }),
     }))
-    expect(createEngine.mock.calls[0][0].ortOptions).not.toHaveProperty('wasmPaths')
+    expect(createEngine.mock.calls[0][0].ortOptions).toHaveProperty(
+      'wasmPaths', new URL('/ort/', window.location.origin).href,
+    )
     expect(predict).toHaveBeenCalledTimes(2)
     expect(result.pages).toEqual([{ text: '모집 대상\n2026년' }, { text: '신청 기간' }])
     expect(result.latencyMs).toBeGreaterThanOrEqual(0)

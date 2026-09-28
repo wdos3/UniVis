@@ -2,7 +2,7 @@
 
 `browserOcr.ts` uses the official Apache-2.0 PaddleOCR.js 0.4.2 SDK, PP-OCRv5 mobile text detection, and its Korean recognition model (which also supports English). Models load lazily from the same origin; no image is uploaded for OCR. The first run downloads approximately 18.4 MB of models plus the ONNX Runtime WASM binary. Subsequent requests can use browser HTTP caching.
 
-The two uncompressed model archives in `frontend/public/models/` were downloaded from PaddlePaddle's official model host on 2026-09-28:
+The two uncompressed model archives in `frontend/public/models/` were downloaded from PaddlePaddle's official model host on 2026-09-28. Their model metadata declares Apache-2.0; the license copy is in `frontend/public/models/LICENSE`:
 
 | Asset | Source | SHA-256 |
 | --- | --- | --- |
@@ -10,10 +10,13 @@ The two uncompressed model archives in `frontend/public/models/` were downloaded
 | `korean_PP-OCRv5_mobile_rec_onnx_infer.tar` | <https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/korean_PP-OCRv5_mobile_rec_onnx_infer.tar> | `568ed8b43a260adc9f484d92105e425ea8cddf8ce16940c177bc12864cfb0eb0` |
 
 The PaddleOCR.js worker bundles ONNX Runtime Web 1.24.3, so `package.json`
-pins that transitive version. Vite packages the matching WASM asset with the
-worker; do not override `wasmPaths` with a public-directory URL. That override
-caused dynamic module import failures in Vite development mode. Recheck both
-development and production builds when upgrading PaddleOCR.js or ONNX Runtime.
+pins that transitive version. `frontend/public/ort/` contains the matching
+standard, JSPI, and JSEP `.mjs`/`.wasm` pairs copied from that installed
+package. `browserOcr.ts` passes an absolute same-origin `wasmPaths` URL; a
+relative `/ort/` URL caused Vite development-mode module import failures,
+while omitting `wasmPaths` fetched runtime code from a third-party CDN. Keep
+the pinned package and copied files version-matched when upgrading. The copied
+runtime is MIT licensed; its notice is in `frontend/public/ort/LICENSE`.
 
 The browser SDK uses a worker and single-threaded WASM. Image decoding depends
 on `createImageBitmap` and `OffscreenCanvas`; JPEG, PNG, and WebP are the
