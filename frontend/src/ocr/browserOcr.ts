@@ -1,14 +1,20 @@
 /// <reference types="vite/client" />
 
-import type { OcrResult, PaddleOCR } from '@paddleocr/paddleocr-js'
+import type { OcrResult, OcrResultItem, PaddleOCR } from '@paddleocr/paddleocr-js'
+import type { BoundingBox, OcrSpan } from '../types'
 
 type OcrEngine = Awaited<ReturnType<typeof PaddleOCR.create>>
 
 export interface BrowserOcrResult {
-  pages: { text: string }[]
+  pages: BrowserOcrPage[]
   latencyMs: number
   initializationMs: number
   inferenceMs: number
+}
+
+export interface BrowserOcrPage {
+  text: string
+  spans: OcrSpan[]
 }
 
 let enginePromise: Promise<OcrEngine> | undefined
@@ -57,11 +63,30 @@ async function getEngine(): Promise<OcrEngine> {
   return enginePromise
 }
 
-function pageText(result: OcrResult): string {
-  return result.items
-    .map((item) => item.text.trim())
-    .filter(Boolean)
-    .join('\n')
+function spanBox(item: OcrResultItem, image: OcrResult['image']): BoundingBox | null {
+  if (!item.poly?.length || !image?.width || !image?.height) return null
+  const xs = item.poly.map((point) => point[0] / image.width)
+  const ys = item.poly.map((point) => point[1] / image.height)
+  if (![...xs, ...ys].every(Number.isFinite)) return null
+  const x = Math.max(0, Math.min(1, Math.min(...xs)))
+  const y = Math.max(0, Math.min(1, Math.min(...ys)))
+  const right = Math.max(0, Math.min(1, Math.max(...xs)))
+  const bottom = Math.max(0, Math.min(1, Math.max(...ys)))
+  if (right <= x || bottom <= y) return null
+  return { x, y, width: right - x, height: bottom - y }
+}
+
+function pageText(result: OcrResult): BrowserOcrPage {
+  const lines: string[] = []
+  const spans: BrowserOcrPage['spans'] = []
+  for (const item of result.items) {
+    const text = item.text.trim()
+    if (!text) continue
+    lines.push(text)
+    const box = spanBox(item, result.image)
+    if (box && text.length <= 500 && !text.includes('\n')) spans.push({ text, box })
+  }
+  return { text: lines.join('\n'), spans }
 }
 
 export async function recognizeImages(
@@ -79,7 +104,8 @@ export async function recognizeImages(
   onProgress?.(0, files.length)
   const engine = await getEngine()
   const initializedAt = performance.now()
-  const pages: { text: string }[] = []
+  const pages: BrowserOcrPage[] = []
+  let remainingSpans = 600
 
   for (const [index, file] of files.entries()) {
     let result: OcrResult[]
@@ -94,7 +120,10 @@ export async function recognizeImages(
     if (result.length !== 1) {
       throw new Error(`OCR returned ${result.length} pages for image ${index + 1}; expected one.`)
     }
-    pages.push({ text: pageText(result[0]) })
+    const page = pageText(result[0])
+    const spans = page.spans.slice(0, Math.min(250, remainingSpans))
+    remainingSpans -= spans.length
+    pages.push({ text: page.text, spans })
     onProgress?.(index + 1, files.length)
   }
 

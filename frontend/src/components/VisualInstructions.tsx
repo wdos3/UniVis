@@ -86,12 +86,17 @@ export function VisualInstructions({ result, showEvidence = false, compact = fal
         <CardTitle icon={Route}>What to do</CardTitle>
         <ol className={result.templates.step_flow ? 'step-flow' : 'action-list'}>{n.actions.map((action, index) => <li key={`${action.step}-${action.action}`}>
           <div className="step-number" aria-label={`Step ${action.step}`}>{action.step}</div>
-          <div className="step-copy"><strong>{action.action}</strong>{action.details && <p>{action.details}</p>}{action.deadline && <span className="detail-line"><Clock3 size={15} />{action.deadline}</span>}{action.location && <span className="detail-line"><MapPin size={15} />{action.location}</span>}<Evidence item={action} visible={showEvidence} onViewImage={setEvidenceItem} /></div>
+          <div className="step-copy"><strong>{action.action}</strong>{action.details && <p>{action.details}</p>}{action.deadline && <span className="detail-line"><Clock3 size={15} />{action.deadline}</span>}{action.location && <span className="detail-line"><MapPin size={15} />{action.location}</span>}{action.required_items.length > 0 && <p>Bring: {action.required_items.join(', ')}</p>}<Evidence item={action} visible={showEvidence} onViewImage={setEvidenceItem} /></div>
           {index < n.actions.length - 1 && <ArrowDown className="step-arrow" size={20} aria-hidden="true" />}
         </li>)}</ol>
       </section>}
 
-      {noAction && <section className="visual-card neutral-card"><CardTitle icon={BadgeInfo}>Information only</CardTitle><p>This notice appears primarily informational. No required student action was identified.</p></section>}
+      {noAction && <section className="visual-card neutral-card"><CardTitle icon={BadgeInfo}>Information only</CardTitle><p>This notice appears primarily informational. No required action was identified.</p></section>}
+
+      {n.key_details.length > 0 && <section className="visual-card info-card">
+        <CardTitle icon={BadgeInfo}>Other key details</CardTitle>
+        <FactList items={n.key_details} showEvidence={showEvidence} onViewImage={setEvidenceItem} />
+      </section>}
 
       {warningItems.length > 0 && <section className="visual-card warning-card">
         <CardTitle icon={ShieldAlert}>Important</CardTitle>

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 from openai.lib._pydantic import to_strict_json_schema
 from pydantic import ValidationError
 
-from app.models import NoticeData, SourceFact
+from app.models import Action, LabeledFact, NoticeData, SourceFact
 from app.services.demos import DEMOS
 from app.services.fidelity import calculate_fidelity, select_templates
 from app.services.semantic import OpenAISemanticProvider, SemanticError
-from app.services.text import appears_korean
+from app.services.text import appears_korean, simplified_text
 
 
 def test_korean_detection() -> None:
@@ -74,3 +77,53 @@ def test_demo_preserves_optional_document_and_numbers() -> None:
     assert "3.5" in scholarship.eligibility[0].text
     assert scholarship.deadlines[0].time == "6:00 p.m."
     assert scholarship.exceptions[0].text == "Exchange students cannot apply."
+
+
+def test_simplified_text_retains_structured_details() -> None:
+    notice = NoticeData(
+        actions=[Action(
+            step=1, action="Apply online", details="Postal applications are not accepted.",
+            deadline="September 30 at 18:00", location="Recruitment site",
+            required_items=["Test score"],
+        )],
+        key_details=[LabeledFact(text="Probation lasts three months.")],
+        fees=[LabeledFact(text="No fee stated.")],
+        links=[LabeledFact(text="https://example.org/apply")],
+    )
+
+    output = simplified_text(notice)
+    assert "Postal applications are not accepted" in output
+    assert "September 30 at 18:00" in output
+    assert "Bring: Test score" in output
+    assert "Probation lasts three months" in output
+    assert "https://example.org/apply" in output
+
+
+def test_semantic_prompt_includes_spatial_hints_only_when_supplied() -> None:
+    seen: list[str] = []
+
+    class FakeResponses:
+        async def parse(self, *, input, **kwargs):
+            seen.append(input[1]["content"])
+            return SimpleNamespace(output_parsed=NoticeData(title="Recruitment notice"), usage=None)
+
+    client = SimpleNamespace(responses=FakeResponses())
+    provider = OpenAISemanticProvider(client=client)
+    asyncio.run(provider.analyze("TOEIC\n800 이상", "TOEIC 800 or higher", "en", layout_context="(550,560) TOEIC\n(550,590) 800 이상"))
+
+    assert "SPATIAL OCR HINTS" in seen[0]
+    assert "(550,590) 800 이상" in seen[0]
+
+
+def test_fidelity_exposes_ocr_lines_missing_from_structured_output() -> None:
+    notice = NoticeData(eligibility=[LabeledFact(
+        text="No age restriction", source_evidence="연령제한 없음",
+    )])
+
+    report = calculate_fidelity(
+        notice,
+        "[Page 1]\n연령제한 없음\n거시경제,AI·성장전략,산업경쟁력 조사·연구\n글로벌 협력사업",
+    )
+
+    assert report.unmapped_source_line_count == 2
+    assert "글로벌 협력사업" in report.unmapped_source_lines

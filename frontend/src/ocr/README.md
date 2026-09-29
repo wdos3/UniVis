@@ -26,3 +26,11 @@ before claiming an interactive latency target. A Korean/English synthetic
 fixture succeeded in headless Chrome and Edge on 2026-09-29: about 4.6–5.1 s
 for cold OCR and 2.5–2.8 s warm on this development machine. Those times do
 not include network transfer, translation, or the semantic model.
+
+For photo analysis, the browser sends recognized text and bounded normalized
+text-box coordinates to the API, never the image pixels or filename. The
+coordinates help reconstruct tables whose OCR reading order interleaves
+columns. The raw text remains complete if the coordinate hint limit is reached.
+Aligned English-test score pairs are rendered with a review warning because
+OCR and geometry can still be wrong; other unlinked OCR lines are listed for
+review rather than silently counted as covered facts.

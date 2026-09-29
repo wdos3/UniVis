@@ -31,9 +31,11 @@ from app.models import (
 from app.services.demos import DEMOS, get_demo, match_demo
 from app.services.fidelity import calculate_fidelity, select_templates
 from app.services.extraction.reconciliation import add_page_provenance, split_recovered_pages
+from app.services.extraction.language_scores import add_aligned_language_scores, mark_unverified_language_scores
 from app.services.image_demos import IMAGE_DEMOS
 from app.services.images.pdf_images import render_pdf_pages
 from app.services.images.preprocessing import ImageProcessingError, prepare_image, upload_root
+from app.services.ocr_layout import format_ocr_layout
 from app.services.pdf import DocumentExtractionError, extract_pdf
 from app.services.pipeline import PipelineResult, analyze_image_pipeline, analyze_text_pipeline
 from app.services.public_access import limit_public_analysis, public_mode, require_admin
@@ -102,7 +104,7 @@ def make_result(
         simplified_text=simplified_text(notice),
         notice=notice,
         templates=select_templates(notice),
-        fidelity=calculate_fidelity(notice),
+        fidelity=calculate_fidelity(notice, original_text),
         korean_detected=appears_korean(original_text),
         provider=provider,
         synthetic=synthetic,
@@ -130,9 +132,11 @@ async def analyze(request: AnalyzeRequest) -> AnalysisResult:
     return result
 
 
-async def _run_text_pipeline(request: AnalyzeRequest) -> PipelineResult:
+async def _run_text_pipeline(request: AnalyzeRequest, *, layout_context: str = "") -> PipelineResult:
     try:
-        return await analyze_text_pipeline(request.text, request.target_language, request.provider)
+        return await analyze_text_pipeline(
+            request.text, request.target_language, request.provider, layout_context=layout_context
+        )
     except (TranslationError, SemanticError) as exc:
         logger.warning("analysis_failed provider=%s reason=%s", request.provider, type(exc).__name__)
         status = 422 if "Mock" in str(exc) or "not configured" in str(exc) else 502
@@ -228,7 +232,8 @@ async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
         )
 
     pipeline = await _run_text_pipeline(
-        AnalyzeRequest(text=source_text, target_language=request.target_language, provider=request.provider)
+        AnalyzeRequest(text=source_text, target_language=request.target_language, provider=request.provider),
+        layout_context=format_ocr_layout(request.pages),
     )
     if pipeline.semantic_provider == "mock-semantic":
         normalized_ocr = re.sub(r"\s+", "", "".join(page_texts))
@@ -256,6 +261,7 @@ async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
         for index, text in enumerate(page_texts, start=1)
     ]
     add_page_provenance(pipeline.notice, page_texts, pages)
+    add_aligned_language_scores(pipeline.notice, request.pages, pages)
     blank_pages = [page.page_number for page in pages if not page.readable]
     warnings = [f"Browser OCR recovered no text from page(s): {', '.join(map(str, blank_pages))}."] if blank_pages else []
     acquisition = _pipeline_acquisition(
@@ -467,6 +473,8 @@ async def reprocess_recovered_text(notice_id: str, update: RecoveredTextUpdate) 
         raise HTTPException(status_code=413, detail="Corrected text exceeds the 200,000-character notice limit.")
     pipeline = await _run_text_pipeline(AnalyzeRequest(text=normalized_text, target_language="en", provider=update.provider))
     add_page_provenance(pipeline.notice, recovered_pages, existing.source_pages)
+    if existing.acquisition.ocr_provider == "browser-ocr-kor-eng":
+        mark_unverified_language_scores(pipeline.notice, normalized_text)
     blank_pages = [index for index, text in enumerate(recovered_pages, start=1) if not text]
     warnings = [f"Recovered text remains empty on page(s): {', '.join(map(str, blank_pages))}."] if blank_pages else []
     acquisition = _pipeline_acquisition(

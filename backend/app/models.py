@@ -78,6 +78,19 @@ class SourceFact(BaseModel):
     bounding_box: BoundingBox | None = None
 
 
+class OcrSpan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=500)
+    box: BoundingBox
+
+    @model_validator(mode="after")
+    def box_stays_on_page(self) -> OcrSpan:
+        if self.box.x + self.box.width > 1.000001 or self.box.y + self.box.height > 1.000001:
+            raise ValueError("OCR layout boxes must stay within the page.")
+        return self
+
+
 class ConditionalGroup(GroundedItem):
     group: str = Field(min_length=1)
     application_period: str = ""
@@ -170,6 +183,7 @@ class NoticeData(BaseModel):
     contacts: list[Contact] = Field(default_factory=list)
     fees: list[LabeledFact] = Field(default_factory=list)
     links: list[LabeledFact] = Field(default_factory=list)
+    key_details: list[LabeledFact] = Field(default_factory=list)
     conditional_groups: list[ConditionalGroup] = Field(default_factory=list)
     source_language: str = "ko"
     target_language: str = "en"
@@ -203,6 +217,8 @@ class FidelityReport(BaseModel):
     critical_fields_represented: int = 0
     potentially_missing: list[str] = Field(default_factory=list)
     potentially_invented: list[str] = Field(default_factory=list)
+    unmapped_source_line_count: int = 0
+    unmapped_source_lines: list[str] = Field(default_factory=list)
     serious_issue: bool = False
 
 
@@ -233,6 +249,14 @@ class ClientOcrPage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(max_length=20_000)
+    spans: list[OcrSpan] = Field(default_factory=list, max_length=250)
+
+    @model_validator(mode="after")
+    def spans_match_text(self) -> ClientOcrPage:
+        lines = {line.strip() for line in self.text.splitlines() if line.strip()}
+        if any(span.text.strip() not in lines for span in self.spans):
+            raise ValueError("OCR layout spans must match recognized text lines.")
+        return self
 
 
 class ClientOcrRequest(BaseModel):
@@ -250,6 +274,8 @@ class ClientOcrRequest(BaseModel):
     def limit_recognized_text(self) -> ClientOcrRequest:
         if sum(len(page.text) for page in self.pages) > 50_000:
             raise ValueError("Recognized text exceeds the 50,000-character notice limit.")
+        if sum(len(page.spans) for page in self.pages) > 600:
+            raise ValueError("OCR layout exceeds the 600-span notice limit.")
         return self
 
 

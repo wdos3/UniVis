@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 from app.models import FidelityReport, NoticeData, TemplateSelection
@@ -19,6 +20,7 @@ def _represented_ids(notice: NoticeData) -> set[str]:
         + notice.contacts
         + notice.fees
         + notice.links
+        + notice.key_details
         + notice.conditional_groups
     )
     return {
@@ -28,12 +30,36 @@ def _represented_ids(notice: NoticeData) -> set[str]:
     }
 
 
-def calculate_fidelity(notice: NoticeData) -> FidelityReport:
+def _unmapped_source_lines(notice: NoticeData, source_text: str) -> list[str]:
+    groups = (
+        notice.audience + notice.actions + notice.deadlines + notice.required_documents
+        + notice.eligibility + notice.exceptions + notice.warnings + notice.consequences
+        + notice.locations + notice.contacts + notice.fees + notice.links
+        + notice.key_details + notice.conditional_groups
+    )
+    evidence = [re.sub(r"\s+", "", item.source_evidence) for item in groups if item.source_evidence]
+    unmapped: list[str] = []
+    seen: set[str] = set()
+    for raw_line in source_text.splitlines():
+        line = raw_line.strip()
+        normalized = re.sub(r"\s+", "", line)
+        if line.startswith("[Page ") or normalized in seen:
+            continue
+        seen.add(normalized)
+        if not re.search(r"[가-힣0-9]", normalized) or (len(normalized) < 3 and not re.search(r"\d", normalized)):
+            continue
+        if not any(normalized in quote for quote in evidence):
+            unmapped.append(line)
+    return unmapped
+
+
+def calculate_fidelity(notice: NoticeData, source_text: str = "") -> FidelityReport:
     critical = {fact.id for fact in notice.source_facts if fact.critical}
     represented = critical & _represented_ids(notice)
     missing = sorted(critical - represented)
     known = {fact.id for fact in notice.source_facts}
     invented = sorted(_represented_ids(notice) - known)
+    unmapped_lines = _unmapped_source_lines(notice, source_text) if source_text else []
 
     checks: list[str] = []
     if notice.deadlines:
@@ -52,6 +78,8 @@ def calculate_fidelity(notice: NoticeData) -> FidelityReport:
         warnings.append("Some critical source facts are not represented in output elements")
     if invented:
         warnings.append("Some output elements reference unknown source facts")
+    if unmapped_lines:
+        warnings.append(f"{len(unmapped_lines)} OCR line(s) are not linked to a structured output item; review the original notice.")
 
     return FidelityReport(
         checks=checks,
@@ -60,6 +88,8 @@ def calculate_fidelity(notice: NoticeData) -> FidelityReport:
         critical_fields_represented=len(represented),
         potentially_missing=missing,
         potentially_invented=invented,
+        unmapped_source_line_count=len(unmapped_lines),
+        unmapped_source_lines=unmapped_lines[:30],
         serious_issue=bool(missing or invented or notice.unverified_items),
     )
 
@@ -73,7 +103,7 @@ def select_templates(notice: NoticeData) -> TemplateSelection:
         timeline=len(notice.deadlines) >= 2,
         decision_tree=has_branch or bool(notice.conditional_groups),
         warning_cards=bool(notice.warnings or notice.exceptions or notice.consequences),
-        information_cards=bool(notice.locations or notice.contacts or notice.fees),
+        information_cards=bool(notice.locations or notice.contacts or notice.fees or notice.links or notice.key_details),
     )
     overrides = notice.template_overrides.model_dump(exclude_none=True)
     return selection.model_copy(update=overrides)

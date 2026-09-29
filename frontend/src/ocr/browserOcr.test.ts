@@ -57,9 +57,25 @@ describe('browser OCR', () => {
       'wasmPaths', new URL('/ort/', window.location.origin).href,
     )
     expect(predict).toHaveBeenCalledTimes(2)
-    expect(result.pages).toEqual([{ text: '모집 대상\n2026년' }, { text: '신청 기간' }])
+    expect(result.pages).toEqual([{ text: '모집 대상\n2026년', spans: [] }, { text: '신청 기간', spans: [] }])
     expect(result.latencyMs).toBeGreaterThanOrEqual(0)
     expect(progress.mock.calls).toEqual([[0, 2], [1, 2], [2, 2]])
+  })
+
+  it('retains normalized OCR positions for table reconstruction', async () => {
+    const { recognizeImages } = await moduleUnderTest()
+    predict.mockResolvedValue([{ image: { width: 1000, height: 2000 }, items: [
+      { text: 'TOEIC', score: 1, poly: [[100, 200], [200, 200], [200, 240], [100, 240]] },
+      { text: '800 이상', score: 0.9, poly: [[100, 300], [200, 300], [200, 340], [100, 340]] },
+    ] }])
+
+    const result = await recognizeImages([new File(['x'], 'table.png')])
+
+    expect(result.pages[0].text).toBe('TOEIC\n800 이상')
+    expect(result.pages[0].spans.map((span) => span.text)).toEqual(['TOEIC', '800 이상'])
+    expect(result.pages[0].spans[0].box.x).toBeCloseTo(0.1)
+    expect(result.pages[0].spans[0].box.y).toBeCloseTo(0.1)
+    expect(result.pages[0].spans[1].box.y).toBeCloseTo(0.15)
   })
 
   it('rejects blank OCR results', async () => {

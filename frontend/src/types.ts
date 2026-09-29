@@ -1,5 +1,7 @@
 export type ReviewState = 'verified' | 'needs_review' | 'not_stated'
 export interface BoundingBox { x: number; y: number; width: number; height: number }
+export interface OcrSpan { text: string; box: BoundingBox }
+export interface ClientOcrPage { text: string; spans?: OcrSpan[] }
 
 export interface GroundedItem {
   source_evidence: string
@@ -59,6 +61,7 @@ export interface NoticeData {
   contacts: Contact[]
   fees: LabeledFact[]
   links: LabeledFact[]
+  key_details: LabeledFact[]
   conditional_groups: ConditionalGroup[]
   source_language: string
   target_language: string
@@ -82,6 +85,8 @@ export interface FidelityReport {
   critical_fields_represented: number
   potentially_missing: string[]
   potentially_invented: string[]
+  unmapped_source_line_count?: number
+  unmapped_source_lines?: string[]
   serious_issue: boolean
 }
 

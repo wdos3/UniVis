@@ -4,7 +4,7 @@ import asyncio
 import httpx
 import pytest
 
-from app.models import Action, Contact, DocumentRequirement, NoticeData, SourceFact
+from app.models import Action, Contact, DocumentRequirement, LabeledFact, NoticeData, ReviewState, SourceFact
 from app.services.pipeline import analyze_text_pipeline
 from app.services.semantic import SemanticResult, normalize_notice
 from app.services.translation import MyMemoryTranslationProvider, TranslationResult, split_utf8_chunks
@@ -50,17 +50,22 @@ def test_pipeline_calls_semantic_provider_once(monkeypatch: pytest.MonkeyPatch) 
         def __init__(self) -> None:
             self.calls = 0
 
-        async def analyze(self, source_text: str, translation: str, target_language: str) -> SemanticResult:
+        async def analyze(
+            self, source_text: str, translation: str, target_language: str, *, layout_context: str = ""
+        ) -> SemanticResult:
             self.calls += 1
             assert source_text == "지원 마감: 2026.10.05"
             assert "October 5" in translation
+            assert layout_context == "(550,560) TOEIC"
             return SemanticResult(NoticeData(title="Application notice"), self.name, 1, 120, 80, 200)
 
     semantic = FakeSemantic()
     monkeypatch.setattr("app.services.pipeline.choose_translation_provider", lambda mock=False: FakeTranslator())
     monkeypatch.setattr("app.services.pipeline.choose_semantic_provider", lambda provider: semantic)
 
-    result = asyncio.run(analyze_text_pipeline("지원 마감: 2026.10.05", "en", "openai"))
+    result = asyncio.run(
+        analyze_text_pipeline("지원 마감: 2026.10.05", "en", "openai", layout_context="(550,560) TOEIC")
+    )
 
     assert semantic.calls == 1
     assert result.semantic_requests == 1
@@ -82,3 +87,15 @@ def test_semantic_cleanup_splits_documents_and_keeps_suspect_email_unverified() 
     assert normalized.contacts[0].email == ""
     assert "needs review" in normalized.contacts[0].details
     assert normalized.source_facts[0].critical is False
+
+
+def test_semantic_cleanup_flags_untranslated_user_facing_text() -> None:
+    notice = NoticeData(
+        title="신입직원 채용",
+        eligibility=[LabeledFact(text="학력 제한 없음")],
+    )
+
+    normalized = normalize_notice(notice)
+
+    assert normalized.eligibility[0].state == ReviewState.NEEDS_REVIEW
+    assert "remain in Korean" in normalized.unverified_items[0]

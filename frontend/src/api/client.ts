@@ -1,4 +1,4 @@
-import type { AnalysisResult, DemoSummary, ImageDemoSummary, NoticeData } from '../types'
+import type { AnalysisResult, ClientOcrPage, DemoSummary, ImageDemoSummary, NoticeData } from '../types'
 
 function errorMessage(body: unknown, fallback: string): string {
   if (!body || typeof body !== 'object' || !('detail' in body)) return fallback
@@ -34,7 +34,7 @@ export const api = {
     return request<AnalysisResult>('/api/upload', { method: 'POST', body: data })
   },
   analyzeClientOcr: (
-    pages: { text: string }[],
+    pages: ClientOcrPage[],
     ocrLatencyMs: number,
     provider: string,
     inputType: 'camera_photo' | 'uploaded_image',

@@ -11,8 +11,8 @@ instruction choices are evaluated.
   function.
 - The hosted camera and image upload path runs PaddleOCR.js with Korean/English
   PP-OCRv5 models in the visitor's browser. It posts only ordered recognized
-  text to `/api/analyze-client-ocr`; photo bytes and filenames are not sent to
-  that endpoint. The server still sends recognized text to the configured
+  text and normalized text-box positions to `/api/analyze-client-ocr`; photo
+  bytes and filenames are not sent to that endpoint. The server still sends recognized text to the configured
   translator and semantic provider.
 - `vercel.json` rewrites `/api/*`, `/uploads/*`, and `/demo-images/*` to that
   function and serves the React single-page app for other routes.
@@ -26,7 +26,7 @@ Configure these in the Vercel project settings (Production and Preview as
 appropriate). Never commit `.env` or secret values.
 
 - `OPENAI_API_KEY` — required for real semantic analysis.
-- `OPENAI_MODEL` — defaults to `gpt-4o-mini` for the lower-latency semantic path. Set `gpt-4.1-mini` when higher extraction quality is worth the extra latency.
+- `OPENAI_MODEL` — defaults to `gpt-4o-mini`. Benchmark any replacement on dense, multi-column notices before changing it; a `gpt-4.1-mini` trial here was slower and did not reliably pair exam scores.
 - `TRANSLATION_PROVIDER` — defaults to `mymemory`.
 - `CORS_ORIGINS` — optional for cross-origin callers; the hosted UI uses
   same-origin API rewrites.
@@ -46,3 +46,17 @@ still requires a separately hosted OCR container. Without one, health may
 report `paddleocr-local-unavailable-on-vercel` even while browser OCR works.
 The browser never receives the container token. Image-only PDFs are not yet
 handled by browser OCR on the hosted site; local Python/Docker OCR supports them.
+
+## Fidelity and latency limits
+
+OCR text order can interleave columns and separate table headers from their
+values. Browser OCR therefore sends bounded text-box positions, and the API
+reconstructs clearly aligned English-test score pairs without trusting the
+machine translation's reading order. These pairs are flagged for review.
+The fidelity percentage measures links among facts the semantic model already
+identified; the review panel separately lists OCR lines not mapped to output.
+It is not a guarantee that all source facts were extracted. On a dense
+recruitment poster, both `gpt-4o-mini` and a trial of `gpt-4.1-mini` omitted
+some prose; the latter also mispaired exam scores and exceeded the interactive
+latency target. Keep human review available for high-stakes eligibility and
+deadline information.

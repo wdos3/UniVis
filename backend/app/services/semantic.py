@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 from app.models import DocumentRequirement, NoticeData, ReviewState
 from app.services.demos import match_demo
 from app.services.extraction.reconciliation import exact_values
+from app.services.text import appears_korean
 
 
 class SemanticError(RuntimeError):
@@ -32,14 +33,18 @@ class SemanticProvider(ABC):
     name: str
 
     @abstractmethod
-    async def analyze(self, source_text: str, translation: str, target_language: str) -> SemanticResult:
+    async def analyze(
+        self, source_text: str, translation: str, target_language: str, *, layout_context: str = ""
+    ) -> SemanticResult:
         """Convert bilingual text into typed visual-instruction data."""
 
 
 class MockSemanticProvider(SemanticProvider):
     name = "mock-semantic"
 
-    async def analyze(self, source_text: str, translation: str, target_language: str) -> SemanticResult:
+    async def analyze(
+        self, source_text: str, translation: str, target_language: str, *, layout_context: str = ""
+    ) -> SemanticResult:
         demo = match_demo(source_text)
         if not demo:
             notice = NoticeData(
@@ -62,12 +67,16 @@ class MockSemanticProvider(SemanticProvider):
         return SemanticResult(notice=notice, provider=self.name, requests=0)
 
 
-SYSTEM_PROMPT = """You convert Korean university notice text into typed visual-instruction data for international students.
+SYSTEM_PROMPT = """You convert Korean-language notices into typed, evidence-grounded instructions and key details.
 The Korean OCR text is the evidence authority. The English translation is a reading aid and may contain errors.
 The OCR source can contain labeled, overlapping OCR passes. Reconcile their duplicate lines; do not treat repeated content as separate facts.
 Never infer missing facts. Preserve every date, time, amount, qualification, exception, optional condition, contact, URL, and table-row distinction.
+Spatial OCR hints give text positions on a 0-1000 page grid. In a table, pair a heading and its value by horizontal alignment, not by the OCR or translation reading order. If alignment is uncertain, report the unpaired text for review instead of guessing.
+Extract all applicant requirements and score options, work or program duties, preferred qualifications, process stages, employment terms, and application-writing restrictions. Use key_details for grounded information that has no more specific field. A short summary is not a substitute for these details.
+User-facing text must be in the requested target language. Keep Korean only in source_evidence and source_facts.source_text. Do not output "N/A" for absent contact fields; leave them empty.
 Create sequential source facts F001, F002, and so on. Every actionable or factual output item must reference valid source_fact_ids and quote Korean source_evidence exactly.
-Every critical source fact must be represented by at least one grounded output item: use fees for amounts, deadlines for dates, eligibility/audience for qualifications, actions for submission details, warnings/consequences for payment conditions or restrictions, and contacts/links for contact data. Do not leave a critical source fact referenced only by source_facts.
+Every critical source fact must be represented by at least one grounded output item: use fees for amounts, deadlines for dates, eligibility/audience for qualifications, actions for submission details, warnings/consequences for payment conditions or restrictions, contacts/links for contact data, and key_details for other factual sections. Do not leave a critical source fact referenced only by source_facts.
+For a table-row pairing, source_evidence may quote its exact Korean header and value as separate lines. Mark the item needs_review if the source layout is ambiguous.
 Create one required_documents item per document, even when several documents share one source fact and evidence line.
 Set heading/title-only source facts to critical=false; critical means a fact that changes eligibility, money, dates, actions, documents, restrictions, or contact details.
 Use source_page from [Page N] markers when possible. Mark uncertain OCR content needs_review and explain it in ambiguities or unverified_items.
@@ -84,12 +93,16 @@ class OpenAISemanticProvider(SemanticProvider):
         self.client = client or AsyncOpenAI(api_key=api_key)
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-    async def analyze(self, source_text: str, translation: str, target_language: str) -> SemanticResult:
+    async def analyze(
+        self, source_text: str, translation: str, target_language: str, *, layout_context: str = ""
+    ) -> SemanticResult:
         values = sorted(exact_values(source_text))
+        layout_block = f"SPATIAL OCR HINTS (not additional evidence):\n{layout_context}\n\n" if layout_context else ""
         prompt = (
             f"TARGET LANGUAGE: {target_language}\n"
             f"EXACT VALUES DETECTED LOCALLY: {json.dumps(values, ensure_ascii=False)}\n\n"
             f"KOREAN OCR SOURCE:\n{source_text}\n\n"
+            f"{layout_block}"
             f"TEMPORARY MACHINE TRANSLATION:\n{translation}\n\n"
             "Return a complete NoticeData object. Keep source_language='ko' and set target_language to the requested language."
         )
@@ -152,11 +165,47 @@ def normalize_notice(notice: NoticeData) -> NoticeData:
             ]
 
     for contact in notice.contacts:
+        if contact.phone.strip().lower() in {"n/a", "none", "not provided"}:
+            contact.phone = ""
+        if contact.email.strip().lower() in {"n/a", "none", "not provided"}:
+            contact.email = ""
         if contact.email and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[A-Za-z]{2,}", contact.email):
             suspect = contact.email
             contact.email = ""
             contact.details = f"{contact.details} OCR email needs review: {suspect}".strip()
             contact.state = ReviewState.NEEDS_REVIEW
+
+    untranslated = any(appears_korean(value) for value in (notice.title, notice.summary, notice.purpose))
+    text_items = (
+        notice.audience + notice.eligibility + notice.exceptions + notice.warnings
+        + notice.consequences + notice.locations + notice.fees + notice.links + notice.key_details
+    )
+    for item in text_items:
+        if appears_korean(item.text):
+            item.state = ReviewState.NEEDS_REVIEW
+            untranslated = True
+    for action in notice.actions:
+        if any(appears_korean(value) for value in (action.action, action.details, *action.required_items)):
+            action.state = ReviewState.NEEDS_REVIEW
+            untranslated = True
+    for document in notice.required_documents:
+        if any(appears_korean(value) for value in (document.name, document.condition)):
+            document.state = ReviewState.NEEDS_REVIEW
+            untranslated = True
+    for deadline in notice.deadlines:
+        if any(appears_korean(value) for value in (deadline.date, deadline.time, deadline.description)):
+            deadline.state = ReviewState.NEEDS_REVIEW
+            untranslated = True
+    for contact in notice.contacts:
+        if any(appears_korean(value) for value in (contact.name, contact.details)):
+            contact.state = ReviewState.NEEDS_REVIEW
+            untranslated = True
+    for group in notice.conditional_groups:
+        if any(appears_korean(value) for value in (group.group, group.application_period, group.details)):
+            group.state = ReviewState.NEEDS_REVIEW
+            untranslated = True
+    if untranslated and notice.target_language == "en":
+        notice.unverified_items.append("Some user-facing details remain in Korean; review the English translation before acting.")
     return notice
 
 

@@ -144,6 +144,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .reading-meta { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 15px; margin-bottom: 30px; text-transform: uppercase; font-size: .68rem; letter-spacing: .1em; color: var(--muted); }
 .reading-meta strong { color: var(--green); }
 .condition-description { color: var(--muted); margin-top: -15px; margin-bottom: 28px; font-size: .82rem; }
+.summary-review-note { margin: -10px 0 22px; padding: 12px 14px; border-left: 3px solid #a14828; background: #fff7f2; color: #81361f; font-size: .78rem; line-height: 1.5; }
 .prose-output { white-space: pre-wrap; line-height: 1.85; font-size: .96rem; }
 .simplified-output { line-height: 1.7; }
 
@@ -230,6 +231,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .fidelity-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .fidelity-stats div { display: flex; flex-direction: column; background: white; padding: 13px; border-radius: 8px; border: 1px solid var(--line); }
 .fidelity-stats strong { font-size: 1.35rem; font-family: Georgia, serif; }.fidelity-stats span { color: var(--muted); font-size: .67rem; line-height: 1.3; }
+.unmapped-lines { margin-top: 16px; padding: 12px 14px; border: 1px solid #d9bcae; border-radius: 8px; background: #fff7f2; font-size: .76rem; }.unmapped-lines summary { cursor: pointer; font-weight: 800; color: #8d3b1e; }.unmapped-lines p { color: var(--muted); }.unmapped-lines ul { max-height: 240px; overflow: auto; padding-left: 18px; line-height: 1.5; }
 .check-list { margin-top: 18px; gap: 8px; font-size: .78rem; }
 .check-list li { display: flex; align-items: flex-start; gap: 8px; color: var(--green-dark); }.check-list li svg { flex: 0 0 auto; }.check-list li.check-warning { color: #8d3b1e; }
 .research-cta { max-width: 900px; margin: 22px auto 0; border: 1px solid var(--line); background: var(--cream); padding: 20px 22px; border-radius: 12px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 16px; }

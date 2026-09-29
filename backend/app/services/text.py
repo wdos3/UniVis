@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from app.models import NoticeData
+from app.models import Action, NoticeData
 
 
 KOREAN_PATTERN = re.compile(r"[\uac00-\ud7a3]")
@@ -15,6 +15,19 @@ def appears_korean(text: str) -> bool:
     return len(KOREAN_PATTERN.findall(text)) / non_space >= 0.08
 
 
+def _action_line(action: Action) -> str:
+    parts = [f"{action.step}. {action.action}"]
+    if action.details:
+        parts.append(action.details)
+    if action.deadline:
+        parts.append(f"Deadline: {action.deadline}")
+    if action.location:
+        parts.append(f"Where: {action.location}")
+    if action.required_items:
+        parts.append(f"Bring: {', '.join(action.required_items)}")
+    return " — ".join(parts)
+
+
 def simplified_text(notice: NoticeData) -> str:
     sections: list[tuple[str, list[str]]] = []
     if notice.audience:
@@ -22,7 +35,7 @@ def simplified_text(notice: NoticeData) -> str:
     if notice.summary:
         sections.append(("What this notice says", [notice.summary]))
     if notice.actions:
-        sections.append(("What you must do", [f"{a.step}. {a.action}" for a in notice.actions]))
+        sections.append(("What you must do", [_action_line(action) for action in notice.actions]))
     if notice.deadlines:
         sections.append(
             ("Deadlines", [" — ".join(filter(None, (d.date, d.time, d.description))) for d in notice.deadlines])
@@ -52,6 +65,12 @@ def simplified_text(notice: NoticeData) -> str:
         sections.append(("Important", [item.text for item in notice.warnings + notice.consequences]))
     if notice.locations:
         sections.append(("Where", [item.text for item in notice.locations]))
+    if notice.key_details:
+        sections.append(("Other key details", [item.text for item in notice.key_details]))
+    if notice.fees:
+        sections.append(("Fees", [item.text for item in notice.fees]))
+    if notice.links:
+        sections.append(("Online links", [item.text for item in notice.links]))
     if notice.contacts:
         sections.append(
             (
@@ -60,5 +79,5 @@ def simplified_text(notice: NoticeData) -> str:
             )
         )
     if not notice.actions:
-        sections.append(("Action", ["This notice appears primarily informational. No required student action was identified."]))
+        sections.append(("Action", ["This notice appears primarily informational. No required action was identified."]))
     return "\n\n".join(f"{title}\n" + "\n".join(f"- {line}" for line in lines) for title, lines in sections)

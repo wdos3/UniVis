@@ -15,7 +15,7 @@ vi.mock('./ocr/browserOcr', () => ({ isBrowserOcrSupported: vi.fn(), recognizeIm
 const notice: NoticeData = {
   title: 'Test notice', notice_type: 'Other', audience: [], purpose: '', summary: '',
   actions: [], deadlines: [], required_documents: [], eligibility: [], exceptions: [], warnings: [],
-  consequences: [], locations: [], contacts: [], fees: [], links: [], conditional_groups: [],
+  consequences: [], locations: [], contacts: [], fees: [], links: [], key_details: [], conditional_groups: [],
   source_language: 'ko', target_language: 'en', ambiguities: [], unverified_items: [], source_facts: [],
   template_overrides: { checklist: null, step_flow: null, timeline: null, decision_tree: null, warning_cards: null, information_cards: null },
 }
@@ -71,7 +71,7 @@ describe('App browser OCR', () => {
 
   it('sends recognized text without image bytes and keeps image URLs local', async () => {
     vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: false, default_provider: 'mock', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })
-    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '공지사항 신청 방법' }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
+    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '공지사항 신청 방법', spans: [] }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
     vi.mocked(api.analyzeClientOcr).mockResolvedValue(imageResult)
     const createUrl = vi.fn().mockReturnValueOnce('blob:draft').mockReturnValueOnce('blob:result')
     const revokeUrl = vi.fn()
@@ -84,7 +84,7 @@ describe('App browser OCR', () => {
     fireEvent.change(container.querySelector('input[multiple]')!, { target: { files: [file] } })
     fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
 
-    await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenCalledWith([{ text: '공지사항 신청 방법' }], 1200, 'auto', 'uploaded_image'))
+    await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenCalledWith([{ text: '공지사항 신청 방법', spans: [] }], 1200, 'auto', 'uploaded_image'))
     expect(recognizeImages).toHaveBeenCalledWith([file], expect.any(Function))
     expect(screen.getByAltText('Original notice page 1')).toHaveAttribute('src', 'blob:result')
     expect(screen.getByRole('textbox', { name: '' })).toHaveValue('공지사항 신청 방법')
@@ -102,7 +102,7 @@ describe('App browser OCR', () => {
       source_pages: [{ ...imageResult.source_pages[0], id: 'saved-B-page', original_url: '', processed_url: '' }],
     }
     vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: false, default_provider: 'mock', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: false })
-    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '공지사항 신청 방법' }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
+    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '공지사항 신청 방법', spans: [] }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
     vi.mocked(api.analyzeClientOcr).mockResolvedValue(imageResult)
     vi.mocked(api.notices).mockResolvedValue([savedResult])
     vi.mocked(api.updateNotice).mockResolvedValue(savedResult)
@@ -159,7 +159,7 @@ describe('App browser OCR', () => {
   it('does not leave a previous result visible when mock image OCR cannot be interpreted', async () => {
     vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: false, default_provider: 'mock', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })
     vi.mocked(api.demo).mockResolvedValue({ ...imageResult, source_pages: [], synthetic: true })
-    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '공지사항 다른 날짜' }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
+    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '공지사항 다른 날짜', spans: [] }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
     vi.mocked(api.analyzeClientOcr).mockRejectedValue(new Error('Mock mode requires exact synthetic notice OCR.'))
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn().mockReturnValue('blob:draft') })
     Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })

@@ -95,6 +95,20 @@ def test_client_ocr_rejects_image_data_and_client_metadata(client: TestClient) -
     payload["pages"][0]["filename"] = "private-poster.jpg"
     assert client.post("/api/analyze-client-ocr", json=payload).status_code == 422
 
+    payload = client_ocr_payload(DEMOS[0].original_text)
+    payload["pages"][0]["spans"] = [{
+        "text": "Invented table value",
+        "box": {"x": 0.1, "y": 0.2, "width": 0.1, "height": 0.02},
+    }]
+    assert client.post("/api/analyze-client-ocr", json=payload).status_code == 422
+
+    payload = client_ocr_payload(DEMOS[0].original_text)
+    payload["pages"][0]["spans"] = [{
+        "text": DEMOS[0].original_text.splitlines()[0],
+        "box": {"x": 0.95, "y": 0.2, "width": 0.1, "height": 0.02},
+    }]
+    assert client.post("/api/analyze-client-ocr", json=payload).status_code == 422
+
 
 def test_mock_client_ocr_rejects_partial_demo_title_without_inventing_facts(client: TestClient) -> None:
     partial = client.post(

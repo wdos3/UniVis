@@ -68,6 +68,7 @@ def add_page_provenance(notice: NoticeData, recovered_pages: list[str], source_p
         + notice.contacts
         + notice.fees
         + notice.links
+        + notice.key_details
         + notice.conditional_groups
         + notice.source_facts
     )

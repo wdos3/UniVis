@@ -50,7 +50,9 @@ def _demo_for_images(images: list[PreparedImage]):
     return None
 
 
-async def analyze_text_pipeline(text: str, target_language: str, provider: str) -> PipelineResult:
+async def analyze_text_pipeline(
+    text: str, target_language: str, provider: str, *, layout_context: str = ""
+) -> PipelineResult:
     pipeline_started = perf_counter()
     semantic = choose_semantic_provider(provider)
     is_mock = semantic.name == "mock-semantic"
@@ -59,7 +61,9 @@ async def analyze_text_pipeline(text: str, target_language: str, provider: str) 
     translation: TranslationResult = await translator.translate(text, "ko", target_language)
     translation_latency_ms = round((perf_counter() - translation_started) * 1000)
     semantic_started = perf_counter()
-    structured: SemanticResult = await semantic.analyze(text, translation.text, target_language)
+    structured: SemanticResult = await semantic.analyze(
+        text, translation.text, target_language, layout_context=layout_context
+    )
     semantic_latency_ms = round((perf_counter() - semantic_started) * 1000)
     return PipelineResult(
         source_text=text,
