@@ -2,6 +2,10 @@
   "version": 2,
   "buildCommand": "npm --prefix frontend ci && npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
+  "headers": [
+    { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }] },
+    { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }] }
+  ],
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/index.py?route=/api/:path*" },
     { "source": "/uploads/:path*", "destination": "/api/index.py?route=/uploads/:path*" },

@@ -16,6 +16,10 @@ instruction choices are evaluated.
   translator and semantic provider.
 - `vercel.json` rewrites `/api/*`, `/uploads/*`, and `/demo-images/*` to that
   function and serves the React single-page app for other routes.
+- The HTML entrypoint is sent with `Cache-Control: no-store` so a browser does
+  not retain an old page that references removed hashed assets. The build also
+  preserves the two entrypoint asset names from the affected earlier deployment
+  while existing browser caches expire.
 - Vercel's temporary `/tmp` filesystem is used for prototype uploads and the
   SQLite study store. These values are not durable across cold starts; use a
   managed database/object store before treating this as production storage.
