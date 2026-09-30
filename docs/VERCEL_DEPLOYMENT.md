@@ -9,6 +9,8 @@ instruction choices are evaluated.
 - `frontend/` is built as the Vite static site.
 - The project uses Vercel's `Other` framework preset so static frontend files
   are served separately from the file-based Python function in `api/`.
+- The project-level install/build commands install and build only the Vite
+  frontend; Vercel packages the Python function's pinned runtime separately.
 - `api/index.py` exposes the existing FastAPI application as a Vercel Python
   function.
 - The hosted camera and image upload path runs PaddleOCR.js with Korean/English
