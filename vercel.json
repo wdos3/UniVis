@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "framework": null,
   "buildCommand": "npm --prefix frontend ci && npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
   "functions": {
