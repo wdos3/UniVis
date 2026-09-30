@@ -7,10 +7,8 @@ from uuid import uuid4
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 
-from app.models import SourcePage
+from app.models import ImageQualityIssue, SourcePage
 from app.services.images.models import PreparedImage
-from app.services.images.qr import detect_qr_codes
-from app.services.images.quality import inspect_quality
 
 try:
     from pillow_heif import register_heif_opener
@@ -57,8 +55,21 @@ def prepare_image(data: bytes, filename: str, media_type: str, analysis_id: str,
     if image.width < 40 or image.height < 40:
         raise ImageProcessingError(f"{filename} is too small to process.")
 
-    issues = inspect_quality(image)
-    qr_codes = detect_qr_codes(image, page_number)
+    try:
+        from app.services.images.qr import detect_qr_codes
+        from app.services.images.quality import inspect_quality
+    except ImportError:
+        # The hosted browser-OCR path supplies its own photo and QR checks.
+        # A lightweight API build can still prepare images for a remote OCR
+        # service, but must disclose that local OpenCV checks were unavailable.
+        issues = [ImageQualityIssue(
+            code="local_image_checks_unavailable",
+            message="Local image-quality and QR checks are unavailable in this deployment; inspect the original photo.",
+        )]
+        qr_codes = []
+    else:
+        issues = inspect_quality(image)
+        qr_codes = detect_qr_codes(image, page_number)
     original_width, original_height = image.size
 
     processed = image.copy()

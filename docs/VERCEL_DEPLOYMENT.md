@@ -43,8 +43,10 @@ appropriate). Never commit `.env` or secret values.
 
 The repository's local runtime installs PaddleOCR and PaddlePaddle from
 `backend/requirements.txt`. The Vercel function intentionally leaves those
-large native packages out because their bundle exceeds Vercel's 500 MB
-function limit. Browser PaddleOCR is the no-container path for camera and image
+large native packages out because they exceed its function bundle limit.
+It also omits server-side OpenCV to stay within the hosted
+Python bundle limit; a direct image upload therefore reports that local
+quality/QR checks were unavailable. Browser PaddleOCR is the no-container path for camera and image
 files. On first use it downloads model/runtime assets, then performs inference
 on the visitor's device; performance and browser compatibility must be tested
 on intended phones. A direct call to the legacy server-side image endpoints

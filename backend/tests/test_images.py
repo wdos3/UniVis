@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import sys
 from pathlib import Path
 
 import fitz
@@ -99,6 +100,22 @@ def test_exif_rotation_is_applied() -> None:
     prepared = prepare_image(buffer.getvalue(), "rotated.jpg", "image/jpeg", "test-exif", 1)
     assert prepared.page.width == 800
     assert prepared.page.height == 1200
+
+
+def test_lightweight_hosted_runtime_discloses_missing_local_image_checks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    image = Image.new("RGB", (120, 120), "white")
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    monkeypatch.setitem(sys.modules, "app.services.images.qr", None)
+    monkeypatch.setattr(preprocessing, "upload_root", lambda: tmp_path)
+
+    prepared = prepare_image(buffer.getvalue(), "notice.png", "image/png", "lightweight", 1)
+
+    assert prepared.page.qr_codes == []
+    assert [issue.code for issue in prepared.page.quality_issues] == ["local_image_checks_unavailable"]
+    assert prepared.page.readable
 
 
 def test_oversized_pixel_area_is_rejected_before_decoding(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -6,7 +6,6 @@ pydantic==2.11.7
 python-multipart==0.0.20
 Pillow==11.3.0
 numpy==2.2.6
-opencv-python-headless==4.12.0.88
 qrcode[pil]==8.2
 openai==1.99.9
 python-dotenv==1.1.1
