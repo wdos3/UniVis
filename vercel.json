@@ -2,6 +2,11 @@
   "version": 2,
   "buildCommand": "npm --prefix frontend ci && npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
+  "functions": {
+    "api/index.py": {
+      "excludeFiles": "{frontend/**,backend/tests/**,docs/**,deploy/**,ocr_service/**,data/**}"
+    }
+  },
   "headers": [
     { "source": "/", "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }] },
     { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-store, max-age=0" }] }

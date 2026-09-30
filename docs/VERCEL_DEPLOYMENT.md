@@ -18,6 +18,8 @@ instruction choices are evaluated.
   to the configured translator and semantic provider.
 - `vercel.json` rewrites `/api/*`, `/uploads/*`, and `/demo-images/*` to that
   function and serves the React single-page app for other routes.
+- The Python function excludes the frontend build tree, tests, and deployment
+  documentation from its bundle; frontend assets are served separately.
 - The HTML entrypoint is sent with `Cache-Control: no-store` so a browser does
   not retain an old page that references removed hashed assets. The build also
   preserves the two entrypoint asset names from the affected earlier deployment
