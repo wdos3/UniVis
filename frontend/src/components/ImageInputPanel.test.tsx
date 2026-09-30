@@ -75,4 +75,27 @@ describe('ImageInputPanel', () => {
     expect(screen.getByRole('button', { name: 'Retry analysis with corrected text' })).toBeDisabled()
     expect(screen.getByText(/20,001 \/ 20,000/)).toBeInTheDocument()
   })
+
+  it('finds an actionable source correction in the retained page text', () => {
+    const corrupted = '문의:02.710.25n0'
+    const text = `신청 기간\n${corrupted}`
+    render(<ImageInputPanel {...correctionProps} pages={[page]} demos={[]} status="ready" busy={false} processingImages={false} progressStage={1} ocrCompleted={1} onAdd={vi.fn()} onRemove={vi.fn()} onMove={vi.fn()} onAnalyze={vi.fn()} onLoadDemo={vi.fn()} recoveredPages={[{ text, spans: [] }]} sourceCorrections={[{
+      page: 1, line: 47, text: corrupted, reason: 'Retype the unreadable telephone digit from the photo.',
+    }]} />)
+    expect(screen.getByText('Retype the unreadable telephone digit from the photo.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Find in page text' }))
+    const input = screen.getByRole('textbox', { name: /Page 1 recognized text/i }) as HTMLTextAreaElement
+    expect(input).toHaveFocus()
+    expect(input.selectionStart).toBe(text.indexOf(corrupted))
+    expect(input.selectionEnd).toBe(text.length)
+  })
+
+  it('flags low-confidence lines without suggesting that confidence certifies other text', () => {
+    render(<ImageInputPanel {...correctionProps} pages={[page]} demos={[]} status="ready" busy={false} processingImages={false} progressStage={1} ocrCompleted={1} onAdd={vi.fn()} onRemove={vi.fn()} onMove={vi.fn()} onAnalyze={vi.fn()} onLoadDemo={vi.fn()} recoveredPages={[{
+      text: '기간입C이끼지', spans: [{ text: '기간입C이끼지', confidence: 0.556, box: { x: 0.8, y: 0.1, width: 0.1, height: 0.03 } }],
+    }]} />)
+    expect(screen.getByText(/OCR confidence is 56%/)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /Page 1 recognized text/i })).toHaveValue('기간입C이끼지')
+    expect(screen.getByRole('button', { name: 'Retry analysis with corrected text' })).toBeEnabled()
+  })
 })

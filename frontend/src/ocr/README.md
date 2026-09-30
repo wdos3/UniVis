@@ -27,6 +27,26 @@ fixture succeeded in headless Chrome and Edge on 2026-09-29: about 4.6–5.1 s
 for cold OCR and 2.5–2.8 s warm on this development machine. Those times do
 not include network transfer, translation, or the semantic model.
 
+Tall photos higher than the detector's 2000-pixel limit also get a local OCR
+pass over their lower 16%. This makes small footer and contact text larger at
+detection time. This narrower crop uses a 2800-pixel detector limit, mild local
+contrast, and lower detection thresholds. The crop uses the browser's EXIF-oriented bitmap, and its boxes
+are mapped back to the full photo. Duplicate readings are removed only when
+their text matches exactly and their boxes overlap substantially; differing
+readings remain available for reconciliation or manual correction. The extra
+pass costs time and does not guarantee that a footer is readable. A failed
+detail pass leaves an explicit photo-review warning.
+
+OCR spans retain bounded SDK confidence scores, including low-confidence
+readings. These scores are hints, not calibrated correctness probabilities;
+a high-scoring line can still contain an incorrect telephone digit. Text is
+never filtered by confidence. The UI reports model initialization versus reuse,
+total detection and recognition times (including the detail pass), local OCR
+with QR work, and the latest server-request wall time including network. The
+displayed processing total excludes time spent editing and prior failed
+requests. These browser timings belong to the current session and are not
+persisted as server measurements.
+
 For photo analysis, the browser sends recognized text and bounded normalized
 text-box coordinates to the API, never the image pixels or filename. The API
 uses these coordinates to reorder only a substantial, unambiguous
@@ -41,6 +61,13 @@ OpenAI calls and still cannot certify semantic accuracy or recover text OCR
 missed. If material OCR text cannot be interpreted confidently, analysis stops
 and asks the user to correct recovered text and retry without rerunning OCR
 instead of presenting an incomplete summary.
+
+Structured correction errors identify source text and a specific reason for
+review. The user can select the indicated reading in its retained page text and
+retry without running OCR again. Unchanged, uniquely matched lines retain their
+positions when other lines are added or removed. In-place corrected lines can
+keep approximate boxes but lose their old OCR confidence. Reordering source
+lines clears position hints; ambiguous duplicate lines do not get guessed boxes.
 
 The browser also scans the image locally for HTTP(S) QR-code URLs with a
 bundled decoder. Decoding is best-effort and may miss a code when the photo is

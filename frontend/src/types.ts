@@ -1,6 +1,6 @@
 export type ReviewState = 'verified' | 'needs_review' | 'not_stated'
 export interface BoundingBox { x: number; y: number; width: number; height: number }
-export interface OcrSpan { text: string; box: BoundingBox }
+export interface OcrSpan { text: string; box: BoundingBox; confidence?: number }
 export interface ClientOcrPage { text: string; spans?: OcrSpan[] }
 
 export interface GroundedItem {

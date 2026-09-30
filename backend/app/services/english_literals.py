@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from decimal import Decimal, InvalidOperation
 
+from app.services.source_contacts import email_values, phone_values
+
 
 _ENGLISH_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]*")
 _WRAPPED_PHRASES = (
@@ -28,6 +30,28 @@ _SOURCE_TITLE_TERM = re.compile(r"(?<![A-Za-z])(?:[A-Z][a-z]{2,}\s+)+[A-Z][a-z]{
 _MONTH_NAMES = (
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
+)
+_SPENDING_RULES = (
+    (r"기자재", r"\b(?:equipment|instruments?|apparatus|devices?)\b", "equipment"),
+    (r"구입", r"\b(?:purchas\w*|buy\w*|bought|acquir\w*)\b", "purchase"),
+    (r"대여", r"\b(?:rent\w*|hir\w*|borrow\w*|leas\w*)\b", "rental"),
+    (r"재료비", r"\b(?:materials?|supplies)\b", "materials"),
+    (r"도서", r"\bbooks?\b", "books"),
+    (r"인쇄", r"\bprint\w*\b", "printing"),
+    (r"카드\s*결제", r"\bcard\b", "card payment"),
+    (r"방문", r"\bvisit\w*\b|\bin[ -]person\b|\bgo(?:ing)? to\b", "in-person visit"),
+)
+_SOURCE_CONDITIONS = (
+    (r"학부\s*재학생", r"\benrolled\b|\bcurrently attending\b|\bregistered undergraduate", "enrolled undergraduates"),
+    (r"교내", r"\bon[ -]campus\b|\bwithin (?:the |this |our )?(?:university|institution|school)\b|\b(?:at|from|by|of) (?:the|this|our|same) (?:university|institution|school)\b", "on-campus scope"),
+    (r"동일", r"\b(?:same|identical)\b", "same topic"),
+    (r"유사", r"\b(?:similar|comparable)\b", "similar topic"),
+    (r"연구\s*주제[^\n]*지원\s*을\s*받는", r"\b(?:supported|funded)\b|\b(?:receiv(?:e[sd]?|ing)|get(?:s|ting)?|got|obtain(?:s|ed|ing)?)\b(?:\W+\w+){0,4}?\W+(?:support|funding|funds|grants?)\b|\bin receipt of (?:support|funding)\b", "receiving support qualification"),
+    (r"최대", r"\b(?:up to|max(?:imum)?|at most|no more than|capped at|limit(?:ed)? to)\b", "maximum limit"),
+    (r"1\s*인당", r"\b(?:per[ -](?:person|student|participant|individual|capita)|each (?:person|student|participant|individual))\b", "per-person amount"),
+    (r"장학금", r"\bscholarships?\b", "scholarship payment"),
+    (r"불허(?!\s*하지)", r"\b(?:no|not allowed|not permitted|prohibit\w*|forbid\w*|disallow\w*|cannot|may not)\b", "not allowed"),
+    (r"지원\s*대상(?:에서는|에서)?\s*제외", r"\b(?:exclud\w*|not eligible|ineligible|not (?:be |receive |receiving )|cannot receive|without)\b", "exclusion from support"),
 )
 
 
@@ -65,6 +89,30 @@ def missing_english_literals(source_text: str, detail_text: str) -> list[str]:
     return missing
 
 
+def missing_spending_rules(source_text: str, english_text: str) -> list[str]:
+    """Guard common legible spending clauses that numerical checks cannot see.
+
+    This is a narrow omission check, not a general translation verifier. The
+    independent semantic audit still checks conditions and combined meaning.
+    """
+    return [
+        meaning for source, english, meaning in _SPENDING_RULES
+        if re.search(source, source_text) and not re.search(english, english_text, re.IGNORECASE)
+    ]
+
+
+def missing_source_conditions(source_text: str, english_text: str) -> list[str]:
+    """Check explicit scope, limits, payment categories, and exclusion wording.
+
+    Only these recognized source conditions are checked locally; the audit
+    remains responsible for their relationships and the rest of the meaning.
+    """
+    return [
+        meaning for source, english, meaning in _SOURCE_CONDITIONS
+        if re.search(source, source_text) and not re.search(english, english_text, re.IGNORECASE)
+    ]
+
+
 def _display_numbers(text: str) -> set[Decimal]:
     values: set[Decimal] = set()
     for match in _DISPLAY_NUMBER.finditer(text):
@@ -72,6 +120,9 @@ def _display_numbers(text: str) -> set[Decimal]:
             values.add(Decimal(match.group().replace(",", "")))
         except InvalidOperation:
             continue
+    # A dotted calendar date otherwise becomes the decimal "2026.08" plus
+    # "24", hiding its explicit year from the exact-date safeguard.
+    values.update(Decimal(year) for year, _, _ in _SOURCE_DATE.findall(text))
     return values
 
 
@@ -128,6 +179,11 @@ def missing_source_values(source_text: str, english_text: str) -> list[str]:
     for score in _SOURCE_THRESHOLD.findall(source_text):
         if Decimal(score.replace(",", "")) not in numbers:
             missing.append(score)
+    display_phones = phone_values(english_text)
+    for digits, printed in phone_values(source_text).items():
+        if digits not in display_phones:
+            missing.append(f"phone {printed}")
+    missing.extend(f"email {email}" for email in sorted(email_values(source_text) - email_values(english_text)))
     for lower, upper in _SOURCE_COUNT_RANGE.findall(source_text):
         for value in (lower, upper):
             if Decimal(value) not in numbers:

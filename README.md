@@ -32,10 +32,13 @@ It is designed to test whether visualization helps international students identi
 - strict Pydantic intermediate representation—models never generate React or HTML;
 - English-language field repair and a source-line completeness audit that can add grounded details or reject an uncertain result;
 - recorded OCR, translation, semantic, and total latency plus aggregate semantic request/token counts;
+- separate semantic extraction, English repair, and completeness-audit timings; device-side model preparation/detection/recognition and latest server-request timing for photos;
+- a browser-local lower-page detail pass for tall photographs, preserving differing readings and OCR confidence for correction instead of discarding uncertain text;
 - exact Korean evidence and source-fact IDs on important items;
 - deterministic visual-template selection;
 - five grounded text demos and seven generated image fixtures across six photo scenarios;
 - original-photo display, recovered Korean text correction and retry after a failed photo analysis, and image-backed evidence;
+- actionable page/text correction requests for unreadable contacts, unresolved source lines, and incomplete or ambiguous English-test tables;
 - manual researcher correction and regeneration without another AI call;
 - research sessions with isolated A/B/C conditions, questions, elapsed time, confidence, and local SQLite storage;
 - CSV study-data export with comprehension accuracy and critical-information miss rate;
@@ -208,6 +211,18 @@ failure, recovered-text correction, schema validation, fidelity, and CSV export.
 Frontend tests cover camera capture markup, ordered previews, browser OCR and QR
 integration, correction/retry, local-only evidence previews, template rendering,
 and evidence disclosure.
+
+For repeatable live API profiling of a public fixture (this sends recognized
+notice text to the configured translation and semantic services):
+
+```powershell
+& .\backend\.venv\Scripts\python.exe backend\scripts\profile_notice.py --text backend\tests\fixtures\sogang_research_corrected.txt --output "$env:TEMP\univis-corrected-profile.json"
+```
+
+Use `--browser-ocr backend\tests\fixtures\sogang_research_2026_browser_ocr.json`
+to replay positioned OCR. That reuses recorded OCR timing; it does **not** run
+new photo inference. See [measured verification](docs/V2_RECOVERY_VERIFICATION.md)
+for the distinction between fixture, photo, and deployment checks.
 
 ## Repository map
 

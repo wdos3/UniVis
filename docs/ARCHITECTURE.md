@@ -6,6 +6,29 @@ VisNotice separates factual interpretation from presentation. AI providers retur
 
 ## Components
 
+Recovered phone numbers containing unreadable characters and incomplete positioned
+English-test tables are rejected before translation/semantic requests. Recovery
+errors use HTTP 422 with `code`, `message`, and page/line/text/reason corrections.
+The frontend quotes the affected text and can focus its page editor; correction
+does not require another OCR pass. Confidence accompanies OCR positions but never
+permits deleting source words or certifies a phone number.
+
+The model's extraction schema omits application-owned image coordinates, page IDs,
+language settings, and template overrides. The normal public `NoticeData` contract
+is restored locally, and source pages are assigned only from matching evidence.
+The separate completeness audit still sees every substantive recovered source
+unit; repeated cited English is sent once through references to reduce tokens.
+Before this audit, primary items and fact quotes absent from the source are
+rejected. Valid quotes with unrelated fact IDs are linked to their exact source
+evidence and marked for review. The audit must still account for every recovered
+source unit; removing an unsupported claim does not license skipping source text.
+The same audit checks displayed English claims, including summaries and review
+notes. It can reject a model-invented consequence even when its quoted Korean
+exists; affected source units then require complete grounded details.
+Exact dates, amounts, contacts, literal English phrases, research-support scope,
+and common spending clauses have additional deterministic checks. These checks have bounded
+vocabularies and do not prove arbitrary semantic meaning or negation.
+
 ### FastAPI backend
 
 `app/main.py` exposes text, image, PDF, browser-OCR text, demo, recovered-text correction, researcher-edit, and study-result endpoints. Pydantic models in `app/models.py` reject extra fields, invalid steps, duplicate fact IDs, and invalid research condition/confidence values.

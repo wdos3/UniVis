@@ -94,7 +94,7 @@ def test_simplified_text_retains_structured_details() -> None:
     output = simplified_text(notice)
     assert "Postal applications are not accepted" in output
     assert "September 30 at 18:00" in output
-    assert "Bring: Test score" in output
+    assert "Required items: Test score" in output
     assert "Probation lasts three months" in output
     assert "https://example.org/apply" in output
 

@@ -7,8 +7,9 @@ instruction choices are evaluated.
 ## Architecture
 
 - `frontend/` is built as the Vite static site.
-- The project uses Vercel's `Other` framework preset so static frontend files
-  are served separately from the file-based Python function in `api/`.
+- `vercel.json` explicitly sets `framework: null` and the frontend output
+  directory so static files are served separately from the file-based Python
+  function in `api/`. The dashboard preset alone does not describe this packaging.
 - The project-level install/build commands install and build only the Vite
   frontend; Vercel packages the Python function's pinned runtime separately.
 - `api/index.py` exposes the existing FastAPI application as a Vercel Python
@@ -66,7 +67,7 @@ handled by browser OCR on the hosted site; local Python/Docker OCR supports them
 OCR text order can interleave columns and separate table headers from their
 values. Browser OCR therefore sends bounded text-box positions. The API
 reorders a clearly positioned two-column band column-first without dropping
-lines and can add review-marked, horizontally aligned English-test score pairs.
+lines and can add review-marked English-test score pairs aligned in columns or rows.
 It leaves sparse or ambiguous layouts alone rather than guessing. MyMemory
 translation preserves paragraph and OCR-line boundaries where its byte limit
 permits, but its output can still scramble tables.
@@ -84,7 +85,10 @@ participants is presented separately from applicant fees.
 The fidelity percentage measures links among facts the semantic model already
 identified; it is not a completeness or translation-accuracy guarantee. The
 source-line audit cannot recover text OCR missed, certify English meaning, or
-resolve every table. The new follow-up calls also increase tokens and latency.
+resolve every table. The follow-up calls also increase tokens and latency.
+Application-owned fields are omitted from the model's output schema and repeated
+audit display text is stored once to reduce overhead. Stage timings and
+verification limits are recorded in [the verification report](V2_RECOVERY_VERIFICATION.md).
 The 10–15 second end-to-end target is not yet met on a tested dense poster.
 Keep human review available for high-stakes eligibility and deadlines, and do
 not treat this branch as production-ready.

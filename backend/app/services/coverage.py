@@ -16,6 +16,7 @@ class CoverageUnit:
     id: str
     page: int
     text: str
+    line: int = 0
 
 
 @dataclass(frozen=True)
@@ -38,12 +39,15 @@ def _source_units(source_text: str) -> list[CoverageUnit]:
     units: list[CoverageUnit] = []
     seen_by_page: dict[int, set[str]] = {}
     page = 1
+    line_number = 0
     for raw_line in source_text.splitlines():
         line = raw_line.strip()
         marker = PAGE_MARKER.fullmatch(line)
         if marker:
             page = int(marker.group(1))
+            line_number = 0
             continue
+        line_number += 1
         # OCR often emits isolated bullets/arrows/borders. They carry no
         # standalone notice fact; keep every line with a letter or number.
         if not line or not any(character.isalnum() for character in line):
@@ -53,7 +57,7 @@ def _source_units(source_text: str) -> list[CoverageUnit]:
         if normalized in seen:
             continue
         seen.add(normalized)
-        units.append(CoverageUnit(id=f"P{page:03d}-L{len(seen):04d}", page=page, text=line))
+        units.append(CoverageUnit(id=f"P{page:03d}-L{len(seen):04d}", page=page, text=line, line=line_number))
     return units
 
 
@@ -86,7 +90,7 @@ def _quotes_unit(unit_text: str, evidence_text: str) -> bool:
     return len(unit_text) >= 8 and unit_text in _normalize(evidence_text)
 
 
-def _display_text(item: GroundedItem) -> str:
+def display_text(item: GroundedItem) -> str:
     # Labels are omitted from most simplified-text entries, so they cannot
     # certify that a Korean fact reached the English digest.
     displayed_fields = (
@@ -116,7 +120,7 @@ def audit_coverage(notice: NoticeData, source_text: str) -> CoverageAudit:
     evidence = [
         (item.source_evidence, item.source_page, display)
         for item in _grounded_items(notice)
-        if item.source_evidence.strip() and (display := _display_text(item))
+        if item.source_evidence.strip() and (display := display_text(item))
     ]
     cited_english_by_unit: dict[str, list[str]] = {}
     uncovered: list[CoverageUnit] = []

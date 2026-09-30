@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from app.models import BoundingBox, ClientOcrPage, LabeledFact, NoticeData, OcrSpan, ReviewState, SourcePage
-from app.services.extraction.language_scores import add_aligned_language_scores, mark_unverified_language_scores
+from app.services.extraction.language_scores import (
+    LanguageScoreError,
+    add_aligned_language_scores,
+    mark_unverified_language_scores,
+    validate_aligned_language_scores,
+)
 
 
 def span(text: str, center_x: float, center_y: float) -> OcrSpan:
@@ -50,6 +57,7 @@ def test_replaces_mispaired_model_scores_with_aligned_ocr_columns() -> None:
     assert all(item.state == ReviewState.NEEDS_REVIEW for item in notice.eligibility[1:])
     assert notice.key_details == []
     assert "800" not in notice.summary
+    assert "can work in Seoul" in notice.summary
     assert all(item.source_image_id == "poster-page-1" for item in notice.eligibility[1:])
     assert all(item.bounding_box is not None for item in notice.eligibility[1:])
 
@@ -78,3 +86,129 @@ def test_text_only_reprocess_warns_when_model_omits_ocr_scores() -> None:
     mark_unverified_language_scores(notice, "TOEIC\n800 이상\nTEPS\n309 이상")
 
     assert "could not be checked" in notice.unverified_items[0]
+
+
+def test_incomplete_table_requires_correction_without_mutating_the_notice() -> None:
+    spans = [
+        span("영어 성적", 0.5, 0.1),
+        span("TOEIC", 0.3, 0.2),
+        span("TEPS", 0.6, 0.2),
+        span("800 이상", 0.3, 0.23),
+    ]
+    page = ClientOcrPage(text="\n".join(item.text for item in spans), spans=spans)
+    notice = NoticeData(eligibility=[LabeledFact(text="TEPS 309 or higher")])
+    original = notice.model_copy(deep=True)
+
+    with pytest.raises(LanguageScoreError) as failure:
+        add_aligned_language_scores(notice, [page], [source_page()])
+
+    assert notice == original
+    assert failure.value.corrections == [
+        {
+            "page": 1,
+            "line": 3,
+            "text": "TEPS",
+            "reason": "Confirm this test name together with its score threshold; OCR positions do not establish a unique pair.",
+        }
+    ]
+
+
+def test_score_cannot_be_reused_for_two_ambiguous_headers() -> None:
+    spans = [
+        span("영어 성적", 0.5, 0.1),
+        span("TOEIC", 0.3, 0.2),
+        span("TEPS", 0.32, 0.2),
+        span("800 이상", 0.31, 0.23),
+    ]
+    page = ClientOcrPage(text="\n".join(item.text for item in spans), spans=spans)
+
+    with pytest.raises(LanguageScoreError, match="test/score pairs"):
+        validate_aligned_language_scores([page])
+
+
+def test_row_table_scores_and_unrelated_mixed_details_are_preserved() -> None:
+    spans = [
+        span("영어 성적", 0.5, 0.1),
+        span("TOEIC", 0.3, 0.2),
+        span("800점 이상", 0.6, 0.2),
+        span("TEPS", 0.3, 0.25),
+        span("309 이상", 0.6, 0.25),
+    ]
+    page = ClientOcrPage(text="\n".join(item.text for item in spans), spans=spans)
+    notice = NoticeData(
+        key_details=[
+            LabeledFact(
+                text="TOEIC 999 is needed; Submit the application by September 20."
+            )
+        ]
+    )
+
+    assert add_aligned_language_scores(notice, [page], [source_page()]) == 2
+
+    assert [item.text for item in notice.eligibility] == [
+        "TOEIC: 800 or higher",
+        "TEPS: 309 or higher",
+    ]
+    assert notice.key_details[0].text == "Submit the application by September 20."
+
+
+def test_two_score_values_for_one_header_require_correction() -> None:
+    spans = [
+        span("영어 성적", 0.5, 0.1),
+        span("TOEIC", 0.3, 0.2),
+        span("TEPS", 0.6, 0.2),
+        span("800 이상", 0.3, 0.23),
+        span("900 이상", 0.3, 0.24),
+        span("309 이상", 0.6, 0.23),
+    ]
+    page = ClientOcrPage(text="\n".join(item.text for item in spans), spans=spans)
+
+    with pytest.raises(LanguageScoreError) as failure:
+        validate_aligned_language_scores([page])
+
+    assert [item["line"] for item in failure.value.corrections] == [5]
+
+
+@pytest.mark.parametrize("subtitle", ["Speakin9", "i8T"])
+def test_unreadable_test_subtitle_requires_exact_correction(subtitle: str) -> None:
+    spans = [
+        span("영어 성적", 0.5, 0.1),
+        span("TOEIC", 0.3, 0.2), span("TOEFL", 0.6, 0.2),
+        span(subtitle, 0.6, 0.21),
+        span("800 이상", 0.3, 0.23), span("91 이상", 0.6, 0.23),
+    ]
+    page = ClientOcrPage(text="\n".join(item.text for item in spans), spans=spans)
+
+    with pytest.raises(LanguageScoreError) as failure:
+        validate_aligned_language_scores([page])
+
+    assert any(item["text"] == subtitle and item["line"] == 4 for item in failure.value.corrections)
+
+
+def test_missing_speaking_subtitle_cannot_create_two_conflicting_toeic_scores() -> None:
+    spans = [
+        span("영어 성적", 0.5, 0.1),
+        span("TOEIC", 0.3, 0.2), span("TOEIC", 0.6, 0.2),
+        span("800 이상", 0.3, 0.23), span("150 이상", 0.6, 0.23),
+    ]
+    page = ClientOcrPage(text="\n".join(item.text for item in spans), spans=spans)
+
+    with pytest.raises(LanguageScoreError) as failure:
+        validate_aligned_language_scores([page])
+
+    assert [item["line"] for item in failure.value.corrections] == [2, 3]
+
+
+def test_one_digit_decimal_model_score_is_replaced_by_aligned_threshold() -> None:
+    spans = [
+        span("영어 성적", 0.5, 0.1),
+        span("TOEIC", 0.3, 0.2), span("IELTS", 0.6, 0.2),
+        span("800 이상", 0.3, 0.23), span("7.5 이상", 0.6, 0.23),
+    ]
+    page = ClientOcrPage(text="\n".join(item.text for item in spans), spans=spans)
+    notice = NoticeData(eligibility=[LabeledFact(text="IELTS 8.0 or higher")])
+
+    assert add_aligned_language_scores(notice, [page], [source_page()]) == 2
+
+    assert [item.text for item in notice.eligibility] == ["TOEIC: 800 or higher", "IELTS: 7.5 or higher"]
+    assert all("8.0" not in item.text for item in notice.eligibility)

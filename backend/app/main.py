@@ -34,7 +34,10 @@ from app.services.demos import DEMOS, get_demo, match_demo
 from app.services.fidelity import calculate_fidelity, select_templates
 from app.services.coverage_repair import CoverageProviderError, CoverageRepairError, repair_coverage
 from app.services.extraction.reconciliation import add_page_provenance, split_recovered_pages
-from app.services.extraction.language_scores import add_aligned_language_scores, mark_unverified_language_scores
+from app.services.extraction.language_scores import (
+    LanguageScoreError, add_aligned_language_scores, mark_unverified_language_scores,
+    validate_aligned_language_scores,
+)
 from app.services.image_demos import IMAGE_DEMOS
 from app.services.images.pdf_images import render_pdf_pages
 from app.services.images.preprocessing import ImageProcessingError, prepare_image, upload_root
@@ -43,7 +46,7 @@ from app.services.pdf import DocumentExtractionError, extract_pdf
 from app.services.pipeline import PipelineResult, analyze_image_pipeline, analyze_text_pipeline
 from app.services.public_access import limit_public_analysis, public_mode, require_admin
 from app.services.ocr import OcrError
-from app.services.semantic import SemanticError
+from app.services.semantic import SemanticError, SourceCorrectionRequired
 from app.services.storage import (
     export_research_csv,
     get_notice,
@@ -141,6 +144,8 @@ async def _run_text_pipeline(request: AnalyzeRequest, *, layout_context: str = "
         return await analyze_text_pipeline(
             request.text, request.target_language, request.provider, layout_context=layout_context
         )
+    except SourceCorrectionRequired as exc:
+        raise _source_correction_error(exc) from exc
     except (TranslationError, SemanticError) as exc:
         logger.warning("analysis_failed provider=%s reason=%s", request.provider, type(exc).__name__)
         status = 422 if "Mock" in str(exc) or "not configured" in str(exc) else 502
@@ -148,6 +153,14 @@ async def _run_text_pipeline(request: AnalyzeRequest, *, layout_context: str = "
     except Exception as exc:
         logger.exception("analysis_failed provider=%s", request.provider)
         raise HTTPException(status_code=502, detail="The configured Version 2 pipeline could not complete the analysis.") from exc
+
+
+def _source_correction_error(exc: Exception, *, message: str | None = None) -> HTTPException:
+    return HTTPException(status_code=422, detail={
+        "code": "source_correction_required",
+        "message": message or str(exc),
+        "corrections": getattr(exc, "corrections", []),
+    })
 
 
 async def _complete_english_coverage(pipeline: PipelineResult, *, layout_context: str = "") -> PipelineResult:
@@ -163,9 +176,8 @@ async def _complete_english_coverage(pipeline: PipelineResult, *, layout_context
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except CoverageRepairError as exc:
         logger.warning("coverage_repair_failed reason=%s", type(exc).__name__)
-        raise HTTPException(
-            status_code=422,
-            detail=f"A complete English interpretation could not be verified: {exc} Retake the photo or correct the recovered text.",
+        raise _source_correction_error(
+            exc, message=f"A complete English interpretation could not be verified: {exc} Correct the listed source text and retry.",
         ) from exc
     elapsed_ms = round((perf_counter() - started) * 1000)
     return replace(
@@ -176,6 +188,7 @@ async def _complete_english_coverage(pipeline: PipelineResult, *, layout_context
         semantic_output_tokens=pipeline.semantic_output_tokens + repair.output_tokens,
         semantic_total_tokens=pipeline.semantic_total_tokens + repair.total_tokens,
         semantic_latency_ms=pipeline.semantic_latency_ms + elapsed_ms,
+        coverage_latency_ms=elapsed_ms,
         total_latency_ms=pipeline.total_latency_ms + elapsed_ms,
     )
 
@@ -208,6 +221,9 @@ def _pipeline_acquisition(
         ocr_latency_ms=pipeline.ocr_latency_ms,
         translation_latency_ms=pipeline.translation_latency_ms,
         semantic_latency_ms=pipeline.semantic_latency_ms,
+        extraction_latency_ms=pipeline.extraction_latency_ms,
+        english_repair_latency_ms=pipeline.english_repair_latency_ms,
+        coverage_latency_ms=pipeline.coverage_latency_ms,
         total_latency_ms=pipeline.total_latency_ms,
     )
 
@@ -258,6 +274,10 @@ async def analyze_text(request: AnalyzeRequest) -> AnalysisResult:
 @app.post("/api/analyze-client-ocr", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])
 async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
     ordered_pages = [reorder_ocr_page_columns(page) for page in request.pages]
+    try:
+        validate_aligned_language_scores(ordered_pages)
+    except LanguageScoreError as exc:
+        raise _source_correction_error(exc) from exc
     page_texts = [page.text.strip() for page in ordered_pages]
     source_text = "\n\n".join(f"[Page {index}]\n{text}" for index, text in enumerate(page_texts, start=1))
     if len(re.findall(r"[가-힣]", source_text)) < 4:
@@ -351,6 +371,8 @@ async def analyze_prepared_images(
         pipeline = await analyze_image_pipeline(prepared_images, target_language, provider)
     except OcrError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SourceCorrectionRequired as exc:
+        raise _source_correction_error(exc) from exc
     except (TranslationError, SemanticError) as exc:
         logger.warning("pipeline_analysis_failed provider=%s reason=%s", provider, type(exc).__name__)
         status = 422 if "Mock" in str(exc) or "not configured" in str(exc) else 502

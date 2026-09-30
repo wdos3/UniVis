@@ -37,6 +37,15 @@ PyMuPDF handles selectable text but reading order can be wrong in multi-column l
 
 ## Long and composite notices
 
+Small-text recovery adds a local lower-page OCR pass for tall hosted photographs.
+It can still miss a footer or return conflicting readings; the UI retains these
+for comparison/correction. A high confidence value does not establish accuracy.
+Exact-value and spending-clause guards cover known patterns, not arbitrary Korean
+meaning. The smaller extraction schema reduces redundant output but retains the
+independent audit; latency remains device/provider-dependent. Measurements and
+the incomplete coverage of real-photo regressions are documented in
+[the verification report](V2_RECOVERY_VERIFICATION.md).
+
 The semantic provider does not implement section-aware chunking and reconciliation. Very long notices may exceed a model limit or lose cross-section context. MyMemory must split text into sub-500-byte queries; the current splitter preserves paragraph/column boundaries and complete OCR lines when they fit but cannot reconstruct table meaning. A long notice can exhaust the public translator's quota or fail partway through. The source-line completeness audit is capped at 120 units. The text API applies a 200,000-character ceiling; visual inputs accept at most 12 pages, 15 MB per image page, and 50 MB total. Provider failures and unverified completeness are surfaced instead of silently bypassed.
 
 ## Visual and cultural interpretation

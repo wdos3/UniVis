@@ -91,3 +91,36 @@ def test_equal_repair_text_on_another_page_is_not_coalesced() -> None:
     merged = coalesce_exact_repair_duplicates(notice)
 
     assert len(merged.audience) == len(merged.key_details) == 1
+
+
+def test_exact_primary_repeat_with_same_evidence_is_merged_in_same_section() -> None:
+    text = "Activity allowance: KRW 200,000 per person"
+    evidence = "활동비: 1인당 20만원"
+    notice = NoticeData(
+        financial_support=[
+            LabeledFact(text=text, source_evidence=evidence, source_fact_ids=["F001"], source_page=1),
+            LabeledFact(text=text, source_evidence=evidence, source_fact_ids=["F002"], source_page=1),
+        ],
+        source_facts=[
+            SourceFact(id="F001", kind="funding", source_text=evidence),
+            SourceFact(id="F002", kind="funding", source_text=evidence),
+        ],
+    )
+
+    merged = coalesce_exact_repair_duplicates(notice)
+
+    assert len(merged.financial_support) == 1
+    assert merged.financial_support[0].source_fact_ids == ["F001", "F002"]
+    assert len(merged.source_facts) == 2
+    assert len(notice.financial_support) == 2
+
+
+def test_same_primary_text_from_distinct_source_lines_remains_separate() -> None:
+    notice = NoticeData(financial_support=[
+        LabeledFact(text="Funding available", source_evidence="연구비 지원", source_fact_ids=["F001"], source_page=1),
+        LabeledFact(text="Funding available", source_evidence="활동비 지원", source_fact_ids=["F002"], source_page=1),
+    ])
+
+    merged = coalesce_exact_repair_duplicates(notice)
+
+    assert len(merged.financial_support) == 2

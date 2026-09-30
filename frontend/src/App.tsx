@@ -3,12 +3,14 @@ import {
   ArrowRight, BookOpenCheck, ChevronDown, Download, Eye, EyeOff, FileText, FlaskConical,
   Image as ImageIcon, LayoutDashboard, LoaderCircle, LockKeyhole, PanelTop, Upload, WandSparkles,
 } from 'lucide-react'
-import { api } from './api/client'
+import { api, ApiError, type SourceCorrection } from './api/client'
 import { FidelityReport } from './components/FidelityReport'
 import { ImageInputPanel, type ImageAnalysisStatus, type ImageDraft } from './components/ImageInputPanel'
 import { OriginalImageView } from './components/OriginalImageView'
 import { VisualInstructions } from './components/VisualInstructions'
-import { isBrowserOcrSupported, recognizeImages, type BrowserOcrPage } from './ocr/browserOcr'
+import { PhotoTimings, type PhotoTimingsData } from './components/PhotoTimings'
+import { isBrowserOcrSupported, recognizeImages, type BrowserOcrMetrics, type BrowserOcrPage } from './ocr/browserOcr'
+import { correctedOcrPage } from './ocr/correctedOcrPage'
 import { AdminView } from './pages/AdminView'
 import { ResearchMode } from './research/ResearchMode'
 import type { AnalysisResult, DemoQuestion, DemoSummary, ImageDemoSummary } from './types'
@@ -19,32 +21,16 @@ type View = 'workspace' | 'research' | 'admin'
 interface OcrDraft {
   imageIds: string[]
   pages: BrowserOcrPage[]
-  latencyMs: number
+  metrics: BrowserOcrMetrics
   source: ImageDraft['source']
 }
 
-const decodedQrPrefix = 'Decoded QR code URL (not opened): '
-
-function correctedOcrPage(page: BrowserOcrPage, text: string): BrowserOcrPage {
-  const previousLines = page.text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-  const correctedLines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-  const positionedCount = page.spans.length
-  const previousPositioned = previousLines.slice(0, positionedCount)
-  const correctedPositioned = correctedLines.slice(0, positionedCount)
-  const sortedCorrected = [...correctedPositioned].sort()
-  const sameLinesInDifferentOrder = previousPositioned.some((line, index) => line !== correctedPositioned[index])
-    && [...previousPositioned].sort().every((line, index) => line === sortedCorrected[index])
-  const canPreservePositions = previousLines.length === correctedLines.length
-    && previousPositioned.every((line, index) => line === page.spans[index].text.trim())
-    && previousLines.slice(positionedCount).every((line) => line.startsWith(decodedQrPrefix))
-    && correctedPositioned.every((line) => line.length > 0 && line.length <= 500)
-    && !sameLinesInDifferentOrder
-
-  return {
-    text,
-    spans: canPreservePositions
-      ? page.spans.map((span, index) => ({ ...span, text: correctedPositioned[index] }))
-      : [],
+async function analyzeClientOcrWithTiming(draft: OcrDraft, provider: string, onDuration: (milliseconds: number) => void): Promise<AnalysisResult> {
+  const startedAt = performance.now()
+  try {
+    return await api.analyzeClientOcr(draft.pages, draft.metrics.latencyMs, provider, draft.source)
+  } finally {
+    onDuration(Math.round(performance.now() - startedAt))
   }
 }
 
@@ -76,6 +62,8 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [processingImages, setProcessingImages] = useState(false)
   const [error, setError] = useState('')
+  const [sourceCorrections, setSourceCorrections] = useState<SourceCorrection[]>([])
+  const [photoTimings, setPhotoTimings] = useState<PhotoTimingsData | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const textArea = useRef<HTMLTextAreaElement>(null)
   const imagePagesRef = useRef<ImageDraft[]>([])
@@ -111,6 +99,7 @@ function App() {
 
   function showResult(analyzed: AnalysisResult) {
     clearResultImages()
+    setPhotoTimings(null)
     setResult(analyzed)
   }
 
@@ -133,6 +122,7 @@ function App() {
   }
 
   function updateResult(updated: AnalysisResult) {
+    setPhotoTimings(null)
     if (updated.id === resultImageOwnerId.current && resultImageUrls.current.length && updated.source_pages.length === resultImageUrls.current.length) {
       setResult({
         ...updated,
@@ -153,6 +143,8 @@ function App() {
     imageSelectionVersion.current += 1
     setOcrDraft(null)
     setShowOcrCorrection(false)
+    setSourceCorrections([])
+    setPhotoTimings(null)
   }
 
   function clearImageAnalysis() {
@@ -190,6 +182,7 @@ function App() {
     setBusy(true); setError('')
     try {
       const analyzed = await api.upload(file, provider)
+      invalidateOcrDraft()
       setText(analyzed.original_text); showResult(analyzed); setQuestions([]); setActiveTab('visual')
     } catch (problem) { setError(problem instanceof Error ? problem.message : 'Upload failed.') }
     finally { setBusy(false); if (fileInput.current) fileInput.current.value = '' }
@@ -225,11 +218,16 @@ function App() {
   }
 
   async function submitRecoveredPages(draft: OcrDraft, pages: ImageDraft[], selectionVersion: number) {
-    const analyzed = await api.analyzeClientOcr(draft.pages, draft.latencyMs, provider, draft.source)
+    const analyzed = await analyzeClientOcrWithTiming(draft, provider, (serverRequestMs) => {
+      if (selectionVersion === imageSelectionVersion.current) {
+        setPhotoTimings({ ...draft.metrics, serverRequestMs })
+      }
+    })
     if (selectionVersion !== imageSelectionVersion.current) return
     setResult(attachLocalImages(analyzed, pages))
     setOcrDraft(null)
     setShowOcrCorrection(false)
+    setSourceCorrections([])
     setQuestions([])
     setActiveTab('original')
   }
@@ -240,6 +238,7 @@ function App() {
     const selectionVersion = imageSelectionVersion.current
     clearResultImages(); setResult(null); setQuestions([])
     setOcrDraft(null); setShowOcrCorrection(false)
+    setSourceCorrections([]); setPhotoTimings(null)
     setBusy(true); setProcessingImages(true); setError(''); setProgressStage(0); setOcrCompleted(0)
     let recovered: OcrDraft | null = null
     try {
@@ -248,7 +247,9 @@ function App() {
         if (selectionVersion === imageSelectionVersion.current) setOcrCompleted(completed)
       })
       if (selectionVersion !== imageSelectionVersion.current) return
-      recovered = { imageIds: pages.map((page) => page.id), pages: recognized.pages, latencyMs: recognized.latencyMs, source }
+      const { pages: recognizedPages, ...metrics } = recognized
+      recovered = { imageIds: pages.map((page) => page.id), pages: recognizedPages, metrics, source }
+      setPhotoTimings(metrics)
       setOcrDraft(recovered)
       setText(recognized.pages.map((page) => page.text).join('\n\n'))
       setProgressStage(1)
@@ -256,6 +257,7 @@ function App() {
     } catch (problem) {
       if (selectionVersion === imageSelectionVersion.current) {
         setError(problem instanceof Error ? problem.message : 'Image analysis failed.')
+        setSourceCorrections(problem instanceof ApiError ? problem.corrections : [])
         setShowOcrCorrection(recovered !== null)
       }
     }
@@ -267,11 +269,14 @@ function App() {
     const pages = [...imagePages]
     if (pages.length !== ocrDraft.imageIds.length || pages.some((page, index) => page.id !== ocrDraft.imageIds[index])) return
     const selectionVersion = imageSelectionVersion.current
-    setBusy(true); setProcessingImages(true); setError(''); setProgressStage(1); setOcrCompleted(pages.length)
+    setBusy(true); setProcessingImages(true); setError(''); setSourceCorrections([]); setProgressStage(1); setOcrCompleted(pages.length)
     try {
       await submitRecoveredPages(ocrDraft, pages, selectionVersion)
     } catch (problem) {
-      if (selectionVersion === imageSelectionVersion.current) setError(problem instanceof Error ? problem.message : 'Image analysis failed.')
+      if (selectionVersion === imageSelectionVersion.current) {
+        setError(problem instanceof Error ? problem.message : 'Image analysis failed.')
+        setSourceCorrections(problem instanceof ApiError ? problem.corrections : [])
+      }
     } finally { setBusy(false); setProcessingImages(false); setProgressStage(0); setOcrCompleted(0) }
   }
 
@@ -303,7 +308,7 @@ function App() {
 
       <section className="workspace page-shell">
         <div className="workspace-heading"><div><span className="section-number">01</span><div><h2>Capture a notice</h2><p>{imageAnalysisStatus === 'unavailable' ? 'Paste Korean text, upload a text-based document, or try a synthetic notice.' : 'Take a photo, combine image pages, upload a PDF, or paste Korean text.'}</p></div></div><label className="language-select">Output language<select disabled aria-label="Output language"><option>English</option></select><ChevronDown size={14} /></label></div>
-        <ImageInputPanel pages={imagePages} demos={imageDemos} status={imageAnalysisStatus} busy={busy} processingImages={processingImages} progressStage={progressStage} ocrCompleted={ocrCompleted} onAdd={addImages} onRemove={removeImage} onMove={moveImage} onAnalyze={analyzeImages} onLoadDemo={loadImageDemo} recoveredPages={showOcrCorrection ? ocrDraft?.pages ?? null : null} onEditRecoveredPage={editRecoveredPage} onRetryAnalysis={retryImageAnalysis} />
+        <ImageInputPanel pages={imagePages} demos={imageDemos} status={imageAnalysisStatus} busy={busy} processingImages={processingImages} progressStage={progressStage} ocrCompleted={ocrCompleted} onAdd={addImages} onRemove={removeImage} onMove={moveImage} onAnalyze={analyzeImages} onLoadDemo={loadImageDemo} recoveredPages={showOcrCorrection ? ocrDraft?.pages ?? null : null} sourceCorrections={sourceCorrections} photoTimings={photoTimings} onEditRecoveredPage={editRecoveredPage} onRetryAnalysis={retryImageAnalysis} />
         <div className="input-divider"><span>or use a document / text source</span></div>
         <div className="secondary-methods"><input ref={fileInput} hidden type="file" accept=".pdf,.txt" onChange={(event) => event.target.files?.[0] && upload(event.target.files[0])} /><button className="secondary-button" disabled={busy} onClick={() => fileInput.current?.click()}><Upload size={17} />Upload text-based PDF or TXT</button><button className="secondary-button" disabled={busy} onClick={() => textArea.current?.focus()}><FileText size={17} />Paste Korean text</button></div>
         <div className="input-grid">
@@ -314,7 +319,7 @@ function App() {
           </div>
           <aside className="demo-card"><span className="eyebrow-text">Start with an example</span><h3>Synthetic notice library</h3><p>Fictional examples exercise deadlines, conditions, documents, and exceptions.</p><div className="demo-list">{demos.map((demo) => <button key={demo.id} disabled={busy} onClick={() => loadDemo(demo.id)}><span>{demo.category}</span><strong>{demo.title}</strong><ArrowRight size={15} /></button>)}</div></aside>
         </div>
-        <div className="generate-bar"><label>Semantic provider<select value={provider} disabled={busy} onChange={(event) => setProvider(event.target.value)}><option value="auto">Auto {openaiConfigured ? '(OpenAI)' : '(mock fallback)'}</option><option value="mock">Mock / demo only</option><option value="openai" disabled={!openaiConfigured}>OpenAI {!openaiConfigured && '— key not configured'}</option></select></label><button className="generate-button" disabled={busy || !text.trim()} onClick={generate}>{busy ? <LoaderCircle className="spin" size={18} /> : <WandSparkles size={18} />}{busy ? 'Analyzing…' : 'Generate instructions'}</button></div>
+        <div className="generate-bar"><label>Semantic provider<select value={provider} disabled={busy} onChange={(event) => setProvider(event.target.value)}><option value="auto">Auto {openaiConfigured ? '(OpenAI)' : '(mock fallback)'}</option><option value="mock">Mock / demo only</option><option value="openai" disabled={!openaiConfigured}>OpenAI {!openaiConfigured && '— key not configured'}</option></select></label><button className="generate-button" disabled={busy || showOcrCorrection || !text.trim()} onClick={generate}>{busy ? <LoaderCircle className="spin" size={18} /> : <WandSparkles size={18} />}{busy ? 'Analyzing…' : 'Generate instructions'}</button></div>
         <p className="privacy-note"><LockKeyhole size={14} />Notice photos stay in this browser; recognized text and any locally decoded QR URLs are sent to this site's server for translation and analysis. Text-based PDF/TXT uploads and generated results are stored on the server. Extracted text may be sent to the translation service, then bilingual text to the semantic provider.</p>
         {error && <p className="error-message" role="alert">{error}</p>}
       </section>
@@ -323,6 +328,7 @@ function App() {
         <div className="results-heading"><div><span className="section-number">02</span><div><span className="eyebrow-text">Analysis complete · {result.provider}</span><h2>{result.notice.title}</h2></div></div><div className="result-tools"><label className="toggle"><input type="checkbox" checked={showEvidence} onChange={(event) => setShowEvidence(event.target.checked)} /><span>{showEvidence ? <Eye size={16} /> : <EyeOff size={16} />}{showEvidence ? 'Evidence shown' : 'Show source evidence'}</span></label><button className="secondary-button" onClick={() => window.print()}><Download size={16} />Print / Save PDF</button></div></div>
         {!result.korean_detected && <div className="inline-notice" role="status">The notice does not appear to be primarily Korean. Analysis was allowed, but the source language should be reviewed.</div>}
         <div className="image-metrics"><div><ImageIcon size={18} /><span>OCR<strong>{result.acquisition.ocr_provider} · {(result.acquisition.ocr_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Translation<strong>{result.acquisition.translation_provider} · {result.acquisition.translation_requests} request(s) · {(result.acquisition.translation_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Semantic step<strong>{result.acquisition.semantic_provider} · {result.acquisition.semantic_requests} call(s) · {(result.acquisition.semantic_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>OpenAI tokens<strong>{result.acquisition.semantic_total_tokens.toLocaleString()}</strong></span></div>{result.source_pages.length > 0 && <><div><span>Pages<strong>{result.acquisition.source_pages}</strong></span></div><div><span>Total pipeline<strong>{(result.acquisition.total_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Facts needing review<strong>{result.acquisition.critical_facts_needing_review}</strong></span></div></>}</div>
+        {photoTimings && <PhotoTimings timings={photoTimings} />}
         <div className="condition-tabs" role="tablist" aria-label="Notice presentation conditions">{tabOptions.map((tab) => <button id={`tab-${tab.id}`} role="tab" aria-selected={activeTab === tab.id} aria-controls={`panel-${tab.id}`} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)} key={tab.id}><span>{tab.short}</span>{tab.label}</button>)}</div>
         <div className="tab-panel" id={`panel-${activeTab}`} role="tabpanel" aria-labelledby={`tab-${activeTab}`}>
           {activeTab === 'original' && (result.source_pages.length > 0 ? <OriginalImageView result={result} provider={provider} editable={!publicMode} onUpdated={updateResult} /> : <article className="reading-panel"><div className="reading-meta"><span>Source language</span><strong>Korean</strong></div><div className="prose-output" lang="ko">{result.original_text}</div></article>)}

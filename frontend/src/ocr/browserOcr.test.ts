@@ -78,6 +78,96 @@ describe('browser OCR', () => {
     expect(result.pages[0].spans[0].box.x).toBeCloseTo(0.1)
     expect(result.pages[0].spans[0].box.y).toBeCloseTo(0.1)
     expect(result.pages[0].spans[1].box.y).toBeCloseTo(0.15)
+    expect(result.pages[0].spans.map((span) => span.confidence)).toEqual([1, 0.9])
+  })
+
+  it('retains uncertain text and confidence instead of discarding low-score lines', async () => {
+    const { recognizeImages } = await moduleUnderTest()
+    predict.mockResolvedValue([{ image: { width: 1000, height: 1000 }, items: [
+      { text: '기간입C이끼지', score: 0.556, poly: [[10, 10], [200, 10], [200, 40], [10, 40]] },
+      { text: '문의 02-710-25n0', score: 0.957, poly: [[10, 50], [200, 50], [200, 90], [10, 90]] },
+    ] }])
+    const result = await recognizeImages([new File(['x'], 'notice.png')])
+    expect(predict).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({ textRecScoreThresh: 0 }))
+    expect(result.pages[0].text).toBe('기간입C이끼지\n문의 02-710-25n0')
+    expect(result.pages[0].spans.map((span) => span.confidence)).toEqual([0.556, 0.957])
+    expect(result.detectionMs).toBeNull()
+    expect(result.recognitionMs).toBeNull()
+  })
+
+  it('recovers small footer text in a local detail pass and maps it back to the photo', async () => {
+    const close = vi.fn()
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 2296, height: 4080, close }))
+    const drawImage = vi.fn()
+    const crop = new Blob(['local footer pixels'], { type: 'image/png' })
+    const convertToBlob = vi.fn().mockResolvedValue(crop)
+    class DetailCanvas {
+      getContext() { return { drawImage } }
+      convertToBlob = convertToBlob
+    }
+    vi.stubGlobal('OffscreenCanvas', DetailCanvas)
+    predict.mockResolvedValueOnce([{ image: { width: 2296, height: 4080 }, metrics: { detMs: 100, recMs: 200 }, items: [
+      { text: '모집 대상', score: 0.99, poly: [[100, 100], [700, 100], [700, 180], [100, 180]] },
+      { text: '장학금 형태로 지급', score: 0.96, poly: [[100, 3500], [700, 3500], [700, 3580], [100, 3580]] },
+      { text: '문의 02-710-25n0', score: 0.95, poly: [[100, 3800], [1200, 3800], [1200, 3880], [100, 3880]] },
+    ] }]).mockResolvedValueOnce([{ image: { width: 2296, height: 653 }, metrics: { detMs: 50, recMs: 75 }, items: [
+      { text: '장학금 형태로 지급', score: 0.999, poly: [[100, 73], [700, 73], [700, 153], [100, 153]] },
+      { text: '문의 02-710-2500 convedu@sogang.ac.kr', score: 0.98, poly: [[100, 373], [1200, 373], [1200, 453], [100, 453]] },
+    ] }])
+    const { recognizeImages } = await moduleUnderTest()
+
+    const result = await recognizeImages([new File(['private photo'], 'notice.png')])
+
+    expect(predict.mock.calls[1][0]).toBe(crop)
+    expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 3427, 2296, 653, 0, 0, 2296, 653)
+    expect(predict.mock.calls[1][1]).toMatchObject({ textDetLimitSideLen: 2800, textDetThresh: 0.2, textDetBoxThresh: 0.25 })
+    expect(result.pages[0].text.split('\n')).toEqual([
+      '모집 대상', '장학금 형태로 지급', '문의 02-710-25n0', '문의 02-710-2500 convedu@sogang.ac.kr',
+    ])
+    expect(result.pages[0].spans[1].confidence).toBe(0.999)
+    expect(result.pages[0].spans[3].box.y).toBeCloseTo(3800 / 4080)
+    expect(result).toMatchObject({ detailPasses: 1, detectionMs: 150, recognitionMs: 275, recoveryWarnings: [] })
+    expect(close).toHaveBeenCalled()
+  })
+
+  it('keeps the first reading and reports when small-text recovery cannot complete', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn().mockRejectedValue(new Error('decode failed')))
+    predict.mockResolvedValue([{ image: { width: 2000, height: 4000 }, items: [
+      { text: '신청 기간', score: 0.99, poly: [[100, 100], [700, 100], [700, 180], [100, 180]] },
+    ] }])
+    const { recognizeImages } = await moduleUnderTest()
+    const result = await recognizeImages([new File(['x'], 'notice.png')])
+    expect(result.pages[0].text).toBe('신청 기간')
+    expect(result.recoveryWarnings).toEqual([expect.stringContaining('Page 1: small text in the lower part could not be checked')])
+    expect(predict).toHaveBeenCalledOnce()
+  })
+
+  it('keeps repeated footer text when its positions differ', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 1000, height: 4000, close: vi.fn() }))
+    class DetailCanvas {
+      getContext() { return { drawImage: vi.fn() } }
+      async convertToBlob() { return new Blob(['footer'], { type: 'image/png' }) }
+    }
+    vi.stubGlobal('OffscreenCanvas', DetailCanvas)
+    predict.mockResolvedValueOnce([{ image: { width: 1000, height: 4000 }, items: [
+      { text: '지원하기', score: 0.99, poly: [[100, 3600], [300, 3600], [300, 3680], [100, 3680]] },
+    ] }]).mockResolvedValueOnce([{ image: { width: 1000, height: 640 }, items: [
+      { text: '지원하기', score: 0.99, poly: [[100, 240], [300, 240], [300, 320], [100, 320]] },
+      { text: '지원하기', score: 0.99, poly: [[100, 400], [300, 400], [300, 480], [100, 480]] },
+    ] }])
+    const { recognizeImages } = await moduleUnderTest()
+    const result = await recognizeImages([new File(['x'], 'notice.png')])
+    expect(result.pages[0].text).toBe('지원하기\n지원하기')
+    expect(result.pages[0].spans.map((span) => span.box.y)).toEqual([0.9, 0.94])
+  })
+
+  it('distinguishes model reuse from the initial load', async () => {
+    predict.mockResolvedValue([{ items: [{ text: '공지', score: 1 }] }])
+    const { recognizeImages } = await moduleUnderTest()
+    const file = new File(['x'], 'notice.png')
+    expect((await recognizeImages([file])).modelState).toBe('initialized')
+    expect((await recognizeImages([file])).modelState).toBe('reused')
+    expect(createEngine).toHaveBeenCalledOnce()
   })
 
   it('appends multiple locally decoded web URLs from one image without opening them', async () => {

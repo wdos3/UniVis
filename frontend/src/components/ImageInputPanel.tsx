@@ -2,6 +2,8 @@ import { Camera, ChevronLeft, ChevronRight, FileImage, ImagePlus, LoaderCircle, 
 import { useRef } from 'react'
 import type { BrowserOcrPage } from '../ocr/browserOcr'
 import type { ImageDemoSummary } from '../types'
+import type { SourceCorrection } from '../api/client'
+import { PhotoTimings, type PhotoTimingsData } from './PhotoTimings'
 
 export interface ImageDraft { id: string; file: File; previewUrl: string; source: 'camera_photo' | 'uploaded_image' }
 export type ImageAnalysisStatus = 'checking' | 'ready' | 'unavailable' | 'error'
@@ -20,19 +22,46 @@ interface Props {
   onAnalyze: () => void
   onLoadDemo: (demo: ImageDemoSummary) => void
   recoveredPages: BrowserOcrPage[] | null
+  sourceCorrections?: SourceCorrection[]
+  photoTimings?: PhotoTimingsData | null
   onEditRecoveredPage: (index: number, text: string) => void
   onRetryAnalysis: () => void
 }
 
 const stages = ['Browser OCR on this device', 'Server translation and semantic analysis']
 
-export function ImageInputPanel({ pages, demos, status, busy, processingImages, progressStage, ocrCompleted, onAdd, onRemove, onMove, onAnalyze, onLoadDemo, recoveredPages, onEditRecoveredPage, onRetryAnalysis }: Props) {
+export function ImageInputPanel({ pages, demos, status, busy, processingImages, progressStage, ocrCompleted, onAdd, onRemove, onMove, onAnalyze, onLoadDemo, recoveredPages, sourceCorrections = [], photoTimings, onEditRecoveredPage, onRetryAnalysis }: Props) {
   const cameraInput = useRef<HTMLInputElement>(null)
   const imageInput = useRef<HTMLInputElement>(null)
+  const correctionInputs = useRef<(HTMLTextAreaElement | null)[]>([])
   const canAnalyzeImages = status === 'ready' && !busy
   const recoveredCharacters = recoveredPages?.reduce((count, page) => count + page.text.length, 0) ?? 0
   const canRetry = canAnalyzeImages && !!recoveredPages?.some((page) => page.text.trim())
     && recoveredCharacters <= 50_000 && recoveredPages.every((page) => page.text.length <= 20_000)
+  const lowConfidenceLines = recoveredPages?.flatMap((page, index) => page.spans.flatMap((span) =>
+    span.confidence !== undefined && span.confidence < 0.85
+      && !sourceCorrections.some((correction) => correction.text === span.text)
+      ? [{ page: index + 1, line: null, text: span.text,
+        reason: `OCR confidence is ${Math.round(span.confidence * 100)}%. Compare this line with the photo and correct any misread characters.` }] : [])) ?? []
+  const corrections = [...sourceCorrections, ...lowConfidenceLines]
+
+  function correctionLocation(correction: SourceCorrection): { pageIndex: number; offset: number } | null {
+    if (!recoveredPages || !correction.text) return null
+    const candidates = recoveredPages.flatMap((page, pageIndex) => {
+      const offset = page.text.indexOf(correction.text)
+      return offset >= 0 ? [{ pageIndex, offset }] : []
+    })
+    return candidates.find(({ pageIndex }) => pageIndex + 1 === correction.page)
+      ?? (candidates.length === 1 ? candidates[0] : null)
+  }
+
+  function focusCorrection(correction: SourceCorrection) {
+    const location = correctionLocation(correction)
+    if (!location) return
+    const input = correctionInputs.current[location.pageIndex]
+    input?.focus()
+    input?.setSelectionRange(location.offset, location.offset + correction.text.length)
+  }
   return <section className="image-input-panel">
     <div className="capture-intro"><div><span className="eyebrow-text">Primary input</span><h3>Photograph a campus notice</h3><p>Take a photo or combine several pages. You can review their order before analysis.</p></div><ScanLine size={38} aria-hidden="true" /></div>
     <div className={`ocr-status ${status === 'ready' ? 'available' : ''}`} role="status">
@@ -54,10 +83,16 @@ export function ImageInputPanel({ pages, demos, status, busy, processingImages, 
       {processingImages ? <div className="processing-pipeline" role="status"><div className="pipeline-title"><LoaderCircle className="spin" size={18} />{progressStage === 0 ? `Reading pages on this device (${ocrCompleted}/${pages.length})…` : 'Analyzing recovered text…'}</div><ol>{stages.map((stage, index) => <li className={index < progressStage ? 'done' : index === progressStage ? 'current' : ''} key={stage}><span>{index < progressStage ? '✓' : index === progressStage ? '●' : '○'}</span>{stage}</li>)}</ol></div> : <button className="analyze-images-button" disabled={!canAnalyzeImages} onClick={onAnalyze}><ScanLine size={19} />Analyze {pages.length > 1 ? `${pages.length} pages as one notice` : 'notice photo'}</button>}
       {recoveredPages && !processingImages && <div className="ocr-correction-panel">
         <div className="ocr-correction-heading"><strong>Review recognized text before retrying</strong><span>{recoveredCharacters.toLocaleString()} / 50,000 characters</span></div>
-        <p>Analysis did not complete, but the photos were read on this device. Compare each page with its photo and correct OCR mistakes. Editing existing lines keeps their approximate positions; adding, removing, or rearranging lines may remove them. The photos remain in this browser.</p>
+        <p>Analysis did not complete, but the photos were read on this device. Compare each page with its photo and correct OCR mistakes. Editing existing lines keeps their approximate positions; unchanged lines keep their positions when other lines are added or removed. Rearranging lines clears position hints. Remove text only if the photo confirms it is decorative or irrelevant. The photos remain in this browser.</p>
+        {corrections.length > 0 && <div className="ocr-correction-requests"><strong>Details to check against the photo</strong><ol>{corrections.map((correction, index) => <li key={`${correction.page}-${correction.line}-${index}`}>
+          <span>{correction.page ? `Page ${correction.page}` : 'Source text'}{correction.line ? ` · source line ${correction.line}` : ''}</span>
+          <blockquote lang="ko">{correction.text}</blockquote><p>{correction.reason}</p>
+          {correctionLocation(correction) && <button className="text-button" disabled={busy} onClick={() => focusCorrection(correction)}>Find in page text</button>}
+        </li>)}</ol></div>}
+        {photoTimings && <PhotoTimings timings={photoTimings} />}
         <div className="ocr-correction-pages">{recoveredPages.map((recovered, index) => <label key={pages[index].id}>
           <span>Page {index + 1} recognized text · {recovered.text.length.toLocaleString()} / 20,000 <a href={pages[index].previewUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()}>Open page photo</a></span>
-          <textarea lang="ko" value={recovered.text} maxLength={20_000} disabled={busy} onChange={(event) => onEditRecoveredPage(index, event.target.value)} />
+          <textarea ref={(element) => { correctionInputs.current[index] = element }} lang="ko" value={recovered.text} maxLength={20_000} disabled={busy} onChange={(event) => onEditRecoveredPage(index, event.target.value)} />
         </label>)}</div>
         <button className="analyze-images-button" disabled={!canRetry} onClick={onRetryAnalysis}>Retry analysis with corrected text</button>
       </div>}

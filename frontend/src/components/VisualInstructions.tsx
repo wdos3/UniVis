@@ -36,7 +36,6 @@ export function VisualInstructions({ result, showEvidence = false, compact = fal
   const [evidenceItem, setEvidenceItem] = useState<GroundedItem | null>(null)
   const evidencePage = result.source_pages.find((page) => page.page_number === evidenceItem?.source_page)
   const warningItems: LabeledFact[] = [...n.warnings, ...n.exceptions, ...n.consequences]
-  const noAction = n.actions.length === 0
   return (
     <article className={`visual-sheet ${compact ? 'visual-sheet--compact' : ''}`} id="visual-instructions">
       <header className="visual-header">
@@ -91,12 +90,10 @@ export function VisualInstructions({ result, showEvidence = false, compact = fal
         <CardTitle icon={Route}>What to do</CardTitle>
         <ol className={result.templates.step_flow ? 'step-flow' : 'action-list'}>{n.actions.map((action, index) => <li key={`${action.step}-${action.action}`}>
           <div className="step-number" aria-label={`Step ${action.step}`}>{action.step}</div>
-          <div className="step-copy"><strong>{action.action}</strong>{action.details && <p>{action.details}</p>}{action.deadline && <span className="detail-line"><Clock3 size={15} />{action.deadline}</span>}{action.location && <span className="detail-line"><MapPin size={15} />{action.location}</span>}{action.required_items.length > 0 && <p>Bring: {action.required_items.join(', ')}</p>}<Evidence item={action} visible={showEvidence} onViewImage={setEvidenceItem} /></div>
+          <div className="step-copy"><strong>{action.action}</strong>{action.details && <p>{action.details}</p>}{action.deadline && <span className="detail-line"><Clock3 size={15} />{action.deadline}</span>}{action.location && <span className="detail-line"><MapPin size={15} />{action.location}</span>}{action.required_items.length > 0 && <p>Required items: {action.required_items.join(', ')}</p>}<Evidence item={action} visible={showEvidence} onViewImage={setEvidenceItem} /></div>
           {index < n.actions.length - 1 && <ArrowDown className="step-arrow" size={20} aria-hidden="true" />}
         </li>)}</ol>
       </section>}
-
-      {noAction && <section className="visual-card neutral-card"><CardTitle icon={BadgeInfo}>Information only</CardTitle><p>This notice appears primarily informational. No required action was identified.</p></section>}
 
       {[...detailGroups].map(([label, items]) => <section className="visual-card info-card" key={label}>
         <CardTitle icon={BadgeInfo}>{label}</CardTitle>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict, deque
 
 from app.models import BoundingBox, ClientOcrPage, LabeledFact, NoticeData, OcrSpan, ReviewState, SourceFact, SourcePage
 
@@ -11,10 +12,19 @@ SCORE = re.compile(r"^((?:\d{1,4}(?:\.\d+)?|\d+[A-Z]|[A-Z]{1,3}\d+))\s*(?:점\s*
 EXAM_SUFFIX = re.compile(r"^(?:\(?iBT\)?|Speaking)$", re.IGNORECASE)
 EXAM_SCORE_CLAIM = re.compile(
     r"\b(?:TOEIC|TOEFL|TEPS|FLEX|OPIC|IELTS)\b.{0,36}?"
-    r"(?:\b\d{2,4}(?:\.\d+)?\b|\b\d+[A-Z]\b|\b[A-Z]{1,3}\d+\b)",
+    r"(?:\b\d{1,4}(?:\.\d+)?\b|\b\d+[A-Z]\b|\b[A-Z]{1,3}\d+\b)",
     re.IGNORECASE,
 )
 ONE_OF_SCORES = re.compile(r"(?:중\s*하나\s*이상|중\s*1개\s*이상)")
+
+
+class LanguageScoreError(ValueError):
+    def __init__(self, corrections: list[dict[str, int | str]]) -> None:
+        super().__init__(
+            "The English-test table has unreadable or ambiguous test/score pairs. "
+            "Correct the indicated test names and score thresholds together, or upload a clearer crop of the table."
+        )
+        self.corrections = corrections
 
 
 def _center(span: OcrSpan) -> tuple[float, float]:
@@ -29,22 +39,42 @@ def _union_box(spans: list[OcrSpan]) -> BoundingBox:
     return BoundingBox(x=left, y=top, width=right - left, height=bottom - top)
 
 
-def _score_pairs(page: ClientOcrPage) -> list[tuple[str, str, str, BoundingBox]]:
+def _score_pairs(
+    page: ClientOcrPage, page_number: int = 1
+) -> list[tuple[str, str, str, BoundingBox]]:
     if not any(token in page.text for token in ("어학", "영어")):
         return []
     headers = [span for span in page.spans if EXAM_NAME.fullmatch(span.text.strip())]
     scores = [span for span in page.spans if SCORE.fullmatch(span.text.strip())]
+    if len(headers) < 2:
+        return []
     pairs: list[tuple[str, str, str, BoundingBox]] = []
+    paired_headers: set[int] = set()
+    headers_by_label: dict[str, list[tuple[OcrSpan, str]]] = {}
+    unresolved: list[OcrSpan] = []
     for score in scores:
         score_x, score_y = _center(score)
         candidates = [
-            header for header in headers
-            if abs(_center(header)[0] - score_x) <= 0.025
-            and 0 < score_y - _center(header)[1] <= 0.06
+            header
+            for header in headers
+            if (
+                abs(_center(header)[0] - score_x) <= 0.025
+                and 0 < score_y - _center(header)[1] <= 0.06
+            )
+            or (
+                abs(_center(header)[1] - score_y)
+                <= max(header.box.height, score.box.height) / 2
+                and 0 < score_x - _center(header)[0] <= 0.6
+            )
         ]
-        if len(candidates) != 1:
+        if len(candidates) != 1 or id(candidates[0]) in paired_headers:
+            # Only flag nearby table values; unrelated thresholds elsewhere on
+            # the page must not prevent a well-formed language table.
+            if any(abs(_center(header)[1] - score_y) <= 0.06 for header in headers):
+                unresolved.append(score)
             continue
         header = candidates[0]
+        paired_headers.add(id(header))
         header_y = _center(header)[1]
         suffixes = [
             span for span in page.spans
@@ -53,33 +83,101 @@ def _score_pairs(page: ClientOcrPage) -> list[tuple[str, str, str, BoundingBox]]
             and header_y < _center(span)[1] < score_y
         ]
         suffixes.sort(key=lambda span: _center(span)[1])
+        unknown_suffixes = [
+            span for span in page.spans
+            if span not in suffixes
+            and re.fullmatch(r"[A-Za-z0-9() -]{2,18}", span.text.strip())
+            and re.search(r"[A-Za-z]", span.text)
+            and abs(_center(span)[0] - score_x) <= 0.025
+            and header_y < _center(span)[1] < score_y
+        ]
+        unresolved.extend(unknown_suffixes)
         fragments = [header, *suffixes, score]
         label = " ".join(span.text.strip() for span in fragments[:-1])
         threshold = SCORE.fullmatch(score.text.strip())
         assert threshold is not None
+        label_key = re.sub(r"[\s()]", "", label).casefold()
+        headers_by_label.setdefault(label_key, []).append((header, threshold.group(1)))
         pairs.append((label, threshold.group(1), "\n".join(span.text.strip() for span in fragments), _union_box(fragments)))
 
-    # A single nearby number is not sufficient evidence of a table row.
-    if len(pairs) < 2:
-        return []
+    unresolved.extend(header for header in headers if id(header) not in paired_headers)
+    # A missing Speaking subtitle would turn two distinct TOEIC exams into
+    # conflicting thresholds for the same test. Do not infer the missing name.
+    for repeated in headers_by_label.values():
+        if len({threshold for _, threshold in repeated}) > 1:
+            unresolved.extend(header for header, _ in repeated)
+    if unresolved:
+        line_slots: dict[str, deque[int]] = defaultdict(deque)
+        for index, line in enumerate(page.text.splitlines(), start=1):
+            line_slots[line.strip()].append(index)
+        line_numbers = {
+            id(span): line_slots[span.text.strip()].popleft()
+            for span in page.spans if line_slots[span.text.strip()]
+        }
+        corrections = [
+            {
+                "page": page_number,
+                "line": line_numbers.get(id(span), 1),
+                "text": span.text.strip(),
+                "reason": "Confirm this test name together with its score threshold; OCR positions do not establish a unique pair.",
+            }
+            for span in {id(span): span for span in unresolved}.values()
+        ]
+        raise LanguageScoreError(corrections)
     return pairs
+
+
+def validate_aligned_language_scores(ocr_pages: list[ClientOcrPage]) -> None:
+    """Reject an incomplete positioned score table before paid semantic calls."""
+    for page_number, page in enumerate(ocr_pages, start=1):
+        _score_pairs(page, page_number)
 
 
 def _model_score_claim(text: str) -> bool:
     return bool(EXAM_SCORE_CLAIM.search(text))
 
 
+def _without_model_score_claims(text: str) -> str:
+    if not _model_score_claim(text):
+        return text
+    clauses = re.split(
+        r"(?<=[.!?])\s+|;\s*|,\s*(?:but|and)\s+", text, flags=re.IGNORECASE
+    )
+    return " ".join(
+        clause for clause in clauses if not _model_score_claim(clause)
+    ).strip()
+
+
 def _remove_model_score_claims(notice: NoticeData) -> None:
     # The model sees OCR text in reading order, which is not reliable for table columns.
     for field in (
-        "audience", "eligibility", "exceptions", "warnings", "consequences",
-        "locations", "fees", "financial_support", "links", "key_details",
+        "audience",
+        "eligibility",
+        "exceptions",
+        "warnings",
+        "consequences",
+        "locations",
+        "fees",
+        "financial_support",
+        "links",
+        "key_details",
     ):
-        setattr(notice, field, [item for item in getattr(notice, field) if not _model_score_claim(item.text)])
+        retained = []
+        for item in getattr(notice, field):
+            text = _without_model_score_claims(item.text)
+            if text:
+                item.text = text
+                retained.append(item)
+        setattr(notice, field, retained)
     for field in ("purpose", "summary"):
         value = getattr(notice, field)
         if _model_score_claim(value):
-            setattr(notice, field, "Check the English-test score requirements against the original notice.")
+            setattr(
+                notice,
+                field,
+                _without_model_score_claims(value)
+                or "Check the English-test score requirements against the original notice.",
+            )
 
 
 def mark_unverified_language_scores(notice: NoticeData, source_text: str = "") -> None:
@@ -101,7 +199,7 @@ def add_aligned_language_scores(notice: NoticeData, ocr_pages: list[ClientOcrPag
     """Replace model-guessed exam thresholds with OCR column-aligned values."""
     found: list[tuple[int, str, str, str, BoundingBox]] = []
     for page_number, page in enumerate(ocr_pages, start=1):
-        found.extend((page_number, *pair) for pair in _score_pairs(page))
+        found.extend((page_number, *pair) for pair in _score_pairs(page, page_number))
     if not found:
         mark_unverified_language_scores(notice, "\n".join(page.text for page in ocr_pages))
         return 0

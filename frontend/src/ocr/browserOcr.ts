@@ -26,12 +26,24 @@ const QR_TILE_STEP = 800
 const QR_MAX_CODES_PER_TILE = 4
 // QR work runs alongside PaddleOCR and may add only this much time after OCR finishes.
 const QR_EXTRA_WAIT_MS = 1500
+const TEXT_DETECTION_MAX_SIDE = 2000
+// Small angled footer text needs a less restrictive detector than a full poster.
+const DETAIL_REGION_START = 0.84
+const DETAIL_DETECTION_MAX_SIDE = 2800
 
-export interface BrowserOcrResult {
-  pages: BrowserOcrPage[]
+export interface BrowserOcrMetrics {
   latencyMs: number
   initializationMs: number
   inferenceMs: number
+  modelState: 'initialized' | 'reused'
+  detectionMs: number | null
+  recognitionMs: number | null
+  detailPasses: number
+  recoveryWarnings: string[]
+}
+
+export interface BrowserOcrResult extends BrowserOcrMetrics {
+  pages: BrowserOcrPage[]
 }
 
 export interface BrowserOcrPage {
@@ -40,6 +52,7 @@ export interface BrowserOcrPage {
 }
 
 let enginePromise: Promise<OcrEngine> | undefined
+let engineReady = false
 
 export function isBrowserOcrSupported(): boolean {
   if (typeof Worker === 'undefined'
@@ -77,8 +90,12 @@ async function getEngine(): Promise<OcrEngine> {
         numThreads: 1,
         simd: true,
       },
-    })).catch((error: unknown) => {
+    })).then((engine) => {
+      engineReady = true
+      return engine
+    }).catch((error: unknown) => {
       enginePromise = undefined
+      engineReady = false
       throw new Error('Korean OCR could not load its local models. Check your connection and try again.', { cause: error })
     })
   }
@@ -106,9 +123,80 @@ function pageText(result: OcrResult): BrowserOcrPage {
     if (!text) continue
     lines.push(text)
     const box = spanBox(item, result.image)
-    if (box && text.length <= 500 && !text.includes('\n')) spans.push({ text, box })
+    if (box && text.length <= 500 && !text.includes('\n')) {
+      const confidence = Number.isFinite(item.score) && item.score >= 0 && item.score <= 1 ? item.score : undefined
+      spans.push({ text, box, ...(confidence !== undefined ? { confidence } : {}) })
+    }
   }
   return { text: lines.join('\n'), spans }
+}
+
+function sameTextRegion(left: OcrSpan, right: OcrSpan): boolean {
+  if (left.text !== right.text) return false
+  const overlapWidth = Math.max(0, Math.min(left.box.x + left.box.width, right.box.x + right.box.width) - Math.max(left.box.x, right.box.x))
+  const overlapHeight = Math.max(0, Math.min(left.box.y + left.box.height, right.box.y + right.box.height) - Math.max(left.box.y, right.box.y))
+  const smallerArea = Math.min(left.box.width * left.box.height, right.box.width * right.box.height)
+  return overlapWidth * overlapHeight >= smallerArea * 0.35
+}
+
+function addDetailText(page: BrowserOcrPage, detail: BrowserOcrPage): BrowserOcrPage {
+  const spans = [...page.spans]
+  const additions: string[] = []
+  const detailLines = detail.text.split('\n')
+  const spansByText = new Map<string, OcrSpan[]>()
+  const lineCounts = new Map<string, number>()
+  detailLines.forEach((text) => lineCounts.set(text, (lineCounts.get(text) ?? 0) + 1))
+  detail.spans.forEach((span) => spansByText.set(span.text, [...(spansByText.get(span.text) ?? []), span]))
+  const fullyPositionedTexts = new Set([...spansByText]
+    .filter(([text, textSpans]) => textSpans.length === lineCounts.get(text))
+    .map(([text]) => text))
+  for (const text of detailLines) {
+    const span = fullyPositionedTexts.has(text) ? spansByText.get(text)?.shift() : undefined
+    const previousIndex = span ? spans.findIndex((candidate) => sameTextRegion(candidate, span)) : -1
+    if (previousIndex >= 0 && span) {
+      if ((span.confidence ?? 0) > (spans[previousIndex].confidence ?? 0)) spans[previousIndex] = span
+      continue
+    }
+    // Different readings of an overlapping line remain evidence for correction.
+    additions.push(text)
+    if (span) spans.push(span)
+  }
+  return { text: [page.text, ...additions].filter(Boolean).join('\n'), spans }
+}
+
+async function recognizeFooter(file: File, fullResult: OcrResult, engine: OcrEngine): Promise<OcrResult | null> {
+  const image = fullResult.image
+  if (!image?.width || !image.height || image.height <= TEXT_DETECTION_MAX_SIDE || image.height / image.width < 1.4) return null
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+  try {
+    if (bitmap.width !== image.width || bitmap.height !== image.height) {
+      throw new Error('The browser image orientation did not match OCR coordinates.')
+    }
+    const top = Math.floor(bitmap.height * DETAIL_REGION_START)
+    const height = bitmap.height - top
+    const canvas = new OffscreenCanvas(bitmap.width, height)
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('A detail image could not be prepared.')
+    context.filter = 'contrast(1.2)'
+    context.drawImage(bitmap, 0, top, bitmap.width, height, 0, 0, bitmap.width, height)
+    const crop = await canvas.convertToBlob({ type: 'image/png' })
+    const results = await engine.predict(crop, {
+      textDetLimitType: 'max', textDetLimitSideLen: DETAIL_DETECTION_MAX_SIDE,
+      textDetThresh: 0.2, textDetBoxThresh: 0.25, textRecScoreThresh: 0,
+    })
+    if (results.length !== 1) throw new Error('Detail OCR returned an unexpected page count.')
+    const result = results[0]
+    if (result.image?.width !== bitmap.width || result.image?.height !== height) {
+      throw new Error('Detail OCR returned inconsistent coordinates.')
+    }
+    return {
+      ...result,
+      image,
+      items: result.items.map((item) => ({ ...item, poly: item.poly?.map(([x, y]) => [x, y + top]) })),
+    }
+  } finally {
+    bitmap.close()
+  }
 }
 
 function webUrl(rawValue: string): string | null {
@@ -233,6 +321,7 @@ export async function recognizeImages(
   }
 
   const startedAt = performance.now()
+  const modelState = engineReady ? 'reused' : 'initialized'
   onProgress?.(0, files.length)
   const qrDecoderPromise: Promise<QrDecoder | null> = import('jsqr')
     .then(({ default: decoder }) => decoder)
@@ -241,6 +330,17 @@ export async function recognizeImages(
   const initializedAt = performance.now()
   const pages: BrowserOcrPage[] = []
   let remainingSpans = 600
+  let detectionMs: number | null = 0
+  let recognitionMs: number | null = 0
+  let detailPasses = 0
+  const recoveryWarnings: string[] = []
+
+  function recordMetrics(result: OcrResult) {
+    detectionMs = detectionMs !== null && Number.isFinite(result.metrics?.detMs) && result.metrics.detMs >= 0
+      ? detectionMs + result.metrics.detMs : null
+    recognitionMs = recognitionMs !== null && Number.isFinite(result.metrics?.recMs) && result.metrics.recMs >= 0
+      ? recognitionMs + result.metrics.recMs : null
+  }
 
   for (const [index, file] of files.entries()) {
     let result: OcrResult[]
@@ -248,7 +348,9 @@ export async function recognizeImages(
     try {
       result = await engine.predict(file, {
         textDetLimitType: 'max',
-        textDetLimitSideLen: 2000,
+        textDetLimitSideLen: TEXT_DETECTION_MAX_SIDE,
+        // Keep uncertain text for source review; confidence never licenses deletion.
+        textRecScoreThresh: 0,
       })
     } catch (error) {
       throw new Error(`Could not read image ${index + 1}. Use a JPEG, PNG, or WebP image supported by this browser.`, { cause: error })
@@ -256,7 +358,18 @@ export async function recognizeImages(
     if (result.length !== 1) {
       throw new Error(`OCR returned ${result.length} pages for image ${index + 1}; expected one.`)
     }
-    const page = pageText(result[0])
+    let page = pageText(result[0])
+    recordMetrics(result[0])
+    try {
+      const detail = await recognizeFooter(file, result[0], engine)
+      if (detail) {
+        detailPasses += 1
+        recordMetrics(detail)
+        page = addDetailText(page, pageText(detail))
+      }
+    } catch {
+      recoveryWarnings.push(`Page ${index + 1}: small text in the lower part could not be checked. Compare the footer with the photo, especially contact details, before relying on the result.`)
+    }
     const qrUrls = await qrUrlsWithoutDelayingOcr(qrUrlsPromise)
     if (qrUrls.length) {
       for (const { url, box } of qrUrls) {
@@ -281,5 +394,10 @@ export async function recognizeImages(
     latencyMs: Math.round(finishedAt - startedAt),
     initializationMs: Math.round(initializedAt - startedAt),
     inferenceMs: Math.round(finishedAt - initializedAt),
+    modelState,
+    detectionMs: detectionMs === null ? null : Math.round(detectionMs),
+    recognitionMs: recognitionMs === null ? null : Math.round(recognitionMs),
+    detailPasses,
+    recoveryWarnings,
   }
 }

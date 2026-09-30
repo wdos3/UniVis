@@ -8,7 +8,8 @@ from app.models import ConditionalGroup, NoticeData
 from app.services.demos import DEMOS
 from app.services.images.models import PreparedImage
 from app.services.ocr import OcrResult, choose_ocr_provider
-from app.services.semantic import SemanticResult, choose_semantic_provider
+from app.services.semantic import SemanticResult, SourceCorrectionRequired, choose_semantic_provider
+from app.services.source_contacts import contact_corrections
 from app.services.translation import TranslationResult, choose_translation_provider
 
 
@@ -28,6 +29,9 @@ class PipelineResult:
     ocr_latency_ms: int = 0
     translation_latency_ms: int = 0
     semantic_latency_ms: int = 0
+    extraction_latency_ms: int = 0
+    english_repair_latency_ms: int = 0
+    coverage_latency_ms: int = 0
     total_latency_ms: int = 0
     warnings: list[str] = field(default_factory=list)
     ocr_provider: str = "not_applicable"
@@ -56,6 +60,8 @@ async def analyze_text_pipeline(
     pipeline_started = perf_counter()
     semantic = choose_semantic_provider(provider)
     is_mock = semantic.name == "mock-semantic"
+    if not is_mock and (corrections := contact_corrections(text)):
+        raise SourceCorrectionRequired("Correct the unreadable phone number in the recovered text and retry.", corrections)
     translator = choose_translation_provider(mock=is_mock)
     translation_started = perf_counter()
     translation: TranslationResult = await translator.translate(text, "ko", target_language)
@@ -79,6 +85,8 @@ async def analyze_text_pipeline(
         semantic_total_tokens=structured.total_tokens,
         translation_latency_ms=translation_latency_ms,
         semantic_latency_ms=semantic_latency_ms,
+        extraction_latency_ms=structured.extraction_latency_ms,
+        english_repair_latency_ms=structured.english_repair_latency_ms,
         total_latency_ms=round((perf_counter() - pipeline_started) * 1000),
         warnings=structured.warnings,
     )
@@ -109,6 +117,8 @@ async def analyze_image_pipeline(images: list[PreparedImage], target_language: s
 
             raise OcrError("Unable to reliably read this notice. PaddleOCR recovered no Korean text; please retake the photo.")
 
+    if semantic.name != "mock-semantic" and (corrections := contact_corrections(ocr.text)):
+        raise SourceCorrectionRequired("Correct the unreadable phone number in the recovered text and retry.", corrections)
     translator = choose_translation_provider(mock=semantic.name == "mock-semantic")
     translation_started = perf_counter()
     translation = await translator.translate(ocr.text, "ko", target_language)
@@ -139,6 +149,8 @@ async def analyze_image_pipeline(images: list[PreparedImage], target_language: s
         ocr_latency_ms=ocr_latency_ms,
         translation_latency_ms=translation_latency_ms,
         semantic_latency_ms=semantic_latency_ms,
+        extraction_latency_ms=structured.extraction_latency_ms,
+        english_repair_latency_ms=structured.english_repair_latency_ms,
         total_latency_ms=round((perf_counter() - pipeline_started) * 1000),
         warnings=ocr.warnings + structured.warnings,
     )

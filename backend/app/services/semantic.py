@@ -5,18 +5,28 @@ import os
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from time import perf_counter
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict
 
 from app.models import DocumentRequirement, GroundedItem, NoticeData, ReviewState
 from app.services.demos import match_demo
-from app.services.extraction.reconciliation import exact_values
+from app.services.extraction.reconciliation import evidence_matches_page, exact_values
 from app.services.grounded_wording import correct_grounded_wording
+from app.services.source_contacts import contact_corrections, email_values, phone_digits, phone_values
 
 
 class SemanticError(RuntimeError):
     pass
+
+
+class SourceCorrectionRequired(SemanticError):
+    """Recovered text needs a specific human correction before interpretation."""
+
+    def __init__(self, message: str, corrections: list[dict]) -> None:
+        super().__init__(message)
+        self.corrections = corrections
 
 
 @dataclass(frozen=True)
@@ -28,6 +38,8 @@ class SemanticResult:
     output_tokens: int = 0
     total_tokens: int = 0
     warnings: list[str] = field(default_factory=list)
+    extraction_latency_ms: int = 0
+    english_repair_latency_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -87,13 +99,39 @@ User-facing text must be in the requested target language. Keep Korean only in s
 For English output, translate every user-facing Korean phrase yourself even if the temporary translation is garbled. Never copy Korean OCR wording into a user-facing field.
 Money awarded or reimbursed to participants belongs in financial_support. Use fees only for money applicants must pay. Keep these directions of payment distinct.
 When a notice says to visit an institute for card payment of funded research purchases, describe that as a funding-use procedure, not merely as a location.
+For research-expense card payments, describe the required visit and payment procedure. Do not imply that a research grant is disbursed by card or that the stated procedure is optional.
 Create sequential source facts F001, F002, and so on. Every actionable or factual output item must reference valid source_fact_ids and quote Korean source_evidence exactly.
 Every critical source fact must be represented by at least one grounded output item: use financial_support for funding and fees for payments owed, deadlines for dates, eligibility/audience for qualifications, actions for submission details, warnings/consequences for payment conditions or restrictions, contacts/links for contact data, and key_details for other factual sections. Do not leave a critical source fact referenced only by source_facts.
 For a table-row pairing, source_evidence may quote its exact Korean header and value as separate lines. Mark the item needs_review if the source layout is ambiguous.
 Create one required_documents item per document, even when several documents share one source fact and evidence line.
 Set heading/title-only source facts to critical=false; critical means a fact that changes eligibility, money, dates, actions, documents, restrictions, or contact details.
-Use source_page from [Page N] markers when possible. Mark uncertain OCR content needs_review and explain it in ambiguities or unverified_items.
+The application assigns page/image provenance from exact source evidence. Mark uncertain OCR content needs_review and explain it in ambiguities or unverified_items.
 Select no presentation HTML: return only the requested structured data. The application renders diagrams deterministically."""
+
+
+class _SemanticNotice(NoticeData):
+    """Keep the semantic contract while omitting application-owned metadata.
+
+    Inherited defaults restore the complete NoticeData object after parsing;
+    the model need not generate empty image boxes or presentation settings.
+    """
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs) -> dict:
+        schema = super().model_json_schema(*args, **kwargs)
+        application_fields = {
+            "source_image_id", "bounding_box", "source_page",
+            "source_language", "target_language", "template_overrides",
+        }
+        for node in (schema, *schema.get("$defs", {}).values()):
+            properties = node.get("properties", {})
+            for name in application_fields:
+                properties.pop(name, None)
+            if "required" in node:
+                node["required"] = [name for name in node["required"] if name not in application_fields]
+        for name in ("BoundingBox", "TemplateOverrides"):
+            schema.get("$defs", {}).pop(name, None)
+        return schema
 
 
 class OpenAISemanticProvider(SemanticProvider):
@@ -109,6 +147,16 @@ class OpenAISemanticProvider(SemanticProvider):
     async def analyze(
         self, source_text: str, translation: str, target_language: str, *, layout_context: str = ""
     ) -> SemanticResult:
+        corrections = contact_corrections(source_text)
+        if corrections:
+            examples = "; ".join(
+                f"Page {item['page']}, line {item['line']}: {item['text']}" for item in corrections[:3]
+            )
+            raise SourceCorrectionRequired(
+                "A contact phone number has unreadable OCR characters. Correct its exact digits from the photo "
+                f"or upload a close-up of the contact line, then retry. {examples}",
+                corrections,
+            )
         values = sorted(exact_values(source_text))
         layout_block = f"SPATIAL OCR HINTS (not additional evidence):\n{layout_context}\n\n" if layout_context else ""
         prompt = (
@@ -117,8 +165,9 @@ class OpenAISemanticProvider(SemanticProvider):
             f"KOREAN OCR SOURCE:\n{source_text}\n\n"
             f"{layout_block}"
             f"TEMPORARY MACHINE TRANSLATION:\n{translation}\n\n"
-            "Return a complete NoticeData object. Keep source_language='ko' and set target_language to the requested language."
+            "Return all semantic fields in the requested target language. Application-owned provenance and settings are assigned locally."
         )
+        extraction_started = perf_counter()
         try:
             response = await self.client.responses.parse(
                 model=self.model,
@@ -126,7 +175,7 @@ class OpenAISemanticProvider(SemanticProvider):
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                text_format=NoticeData,
+                text_format=_SemanticNotice,
             )
         except Exception as exc:
             raise SemanticError("The OpenAI semantic provider could not structure the translated notice.") from exc
@@ -135,9 +184,14 @@ class OpenAISemanticProvider(SemanticProvider):
         usage = getattr(response, "usage", None)
         # The requested language is API input, not a model decision. A model
         # returning "ko" must not disable the English-output safeguards.
-        response.output_parsed.target_language = target_language
-        notice = normalize_notice(response.output_parsed, source_text=source_text)
+        notice = NoticeData.model_validate(response.output_parsed.model_dump())
+        notice.source_language = "ko"
+        notice.target_language = target_language
+        notice = normalize_notice(notice, source_text=source_text)
+        extraction_latency_ms = round((perf_counter() - extraction_started) * 1000)
+        repair_started = perf_counter()
         repair = await repair_english_fields(notice, self.client, self.model)
+        english_repair_latency_ms = round((perf_counter() - repair_started) * 1000)
         if repair.requests:
             notice.unverified_items = [
                 item for item in notice.unverified_items if item != _UNTRANSLATED_WARNING
@@ -152,6 +206,8 @@ class OpenAISemanticProvider(SemanticProvider):
             input_tokens=int(getattr(usage, "input_tokens", 0) or 0) + repair.input_tokens,
             output_tokens=int(getattr(usage, "output_tokens", 0) or 0) + repair.output_tokens,
             total_tokens=int(getattr(usage, "total_tokens", 0) or 0) + repair.total_tokens,
+            extraction_latency_ms=extraction_latency_ms,
+            english_repair_latency_ms=english_repair_latency_ms,
         )
 
 
@@ -164,9 +220,6 @@ _CLOCK_TIME = re.compile(
 )
 _KOREAN_HOUR = re.compile(r"(?<!\d)(?:(오전|오후)\s*)?(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분)?")
 _ENGLISH_HOUR = re.compile(r"(?<!\d)(\d{1,2})\s*(AM|PM)\b", re.IGNORECASE)
-_PHONE_IN_EVIDENCE = re.compile(
-    r"(?<![\w])(?:\+\d{1,3}[. -]?)?\(?\d{1,4}\)?[. -]?\d{3,4}[. -]?\d{4}(?![\w])"
-)
 _PHONE_REVIEW_NOTE = "Phone number does not match the cited source text; verify it against the notice."
 
 
@@ -199,23 +252,9 @@ def _explicit_times(text: str) -> set[int]:
     return times
 
 
-def _phone_digits(value: str) -> str | None:
-    if not re.fullmatch(r"\+?[\d().\s-]{7,}", value):
-        return None
-    digits = re.sub(r"\D", "", value)
-    if not 9 <= len(digits) <= 15:
-        return None
-    if value.strip().startswith("+82") and digits.startswith("82"):
-        return f"0{digits[2:]}"
-    return digits
-
-
 def _phone_matches_evidence(phone: str, evidence: str) -> bool:
-    wanted = _phone_digits(phone)
-    return bool(wanted) and any(
-        _phone_digits(candidate.group()) == wanted
-        for candidate in _PHONE_IN_EVIDENCE.finditer(evidence)
-    )
+    wanted = phone_digits(phone)
+    return bool(wanted) and wanted in phone_values(evidence)
 
 
 def _contains_korean_script(value: str) -> bool:
@@ -331,6 +370,27 @@ async def repair_english_fields(
 def normalize_notice(notice: NoticeData, *, source_text: str = "") -> NoticeData:
     """Apply conservative, deterministic cleanup that does not invent source content."""
     if source_text:
+        page_texts: dict[int, list[str]] = {1: []}
+        page = 1
+        for line in source_text.splitlines():
+            marker = re.fullmatch(r"\[Page (\d+)\]", line.strip())
+            if marker:
+                page = int(marker[1])
+                page_texts.setdefault(page, [])
+            else:
+                page_texts[page].append(line)
+        # Reuse the same evidence matching as image provenance; repeated text
+        # on several pages never receives a guessed page number.
+        page_sources = {number: "\n".join(lines) for number, lines in page_texts.items()}
+        for item in (
+            *notice.audience, *notice.actions, *notice.deadlines, *notice.required_documents,
+            *notice.eligibility, *notice.exceptions, *notice.warnings, *notice.consequences,
+            *notice.locations, *notice.contacts, *notice.fees, *notice.financial_support,
+            *notice.links, *notice.key_details, *notice.conditional_groups, *notice.source_facts,
+        ):
+            evidence = getattr(item, "source_evidence", "") or getattr(item, "source_text", "")
+            matches = [number for number, text in page_sources.items() if evidence_matches_page(evidence, text)]
+            item.source_page = matches[0] if len(matches) == 1 else None
         notice.purpose = correct_grounded_wording(notice.purpose, source_text)
         notice.summary = correct_grounded_wording(notice.summary, source_text)
     for fact in notice.source_facts:
@@ -403,6 +463,10 @@ def normalize_notice(notice: NoticeData, *, source_text: str = "") -> NoticeData
             suspect = contact.email
             contact.email = ""
             contact.details = f"{contact.details} OCR email needs review: {suspect}".strip()
+            contact.state = ReviewState.NEEDS_REVIEW
+        elif contact.email and contact.email.casefold() not in email_values(contact.source_evidence):
+            contact.email = ""
+            contact.details = f"{contact.details} Email address does not match the cited source text; verify it against the notice.".strip()
             contact.state = ReviewState.NEEDS_REVIEW
 
     untranslated = any(_contains_korean_script(value) for value in (notice.title, notice.summary, notice.purpose, notice.notice_type))

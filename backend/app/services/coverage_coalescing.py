@@ -42,9 +42,9 @@ def _merge_evidence(kept: LabeledFact, duplicate: LabeledFact) -> None:
 def coalesce_exact_repair_duplicates(notice: NoticeData) -> NoticeData:
     """Fold exact audit-added repetitions into primary facts on the same page.
 
-    Primary facts remain in their original sections. This deliberately leaves
-    paraphrases and duplicate primary facts alone: either could differ in
-    meaning or section emphasis even when they look similar.
+    Primary facts remain in their original sections. Exact primary repeats
+    within one section are merged only when they quote the same source text.
+    Paraphrases remain separate because similar wording can differ in meaning.
     """
     merged = notice.model_copy(deep=True)
     repair_ids = {
@@ -52,6 +52,7 @@ def coalesce_exact_repair_duplicates(notice: NoticeData) -> NoticeData:
         if fact.kind.startswith("coverage_repair_")
     }
     primary_by_key: dict[tuple[int, str], LabeledFact] = {}
+    primary_by_evidence: dict[tuple[int, str, str, str], LabeledFact] = {}
     repair_by_key: dict[tuple[int, str, str], LabeledFact] = {}
     discarded: set[int] = set()
 
@@ -61,6 +62,15 @@ def coalesce_exact_repair_duplicates(notice: NoticeData) -> NoticeData:
                 continue
             if set(item.source_fact_ids) <= repair_ids:
                 continue
+            if item.source_evidence.strip():
+                evidence_key = re.sub(r"\s+", "", unicodedata.normalize("NFKC", item.source_evidence)).casefold()
+                exact_key = (item.source_page, field, _english_key(item.text), evidence_key)
+                existing = primary_by_evidence.get(exact_key)
+                if existing is not None:
+                    _merge_evidence(existing, item)
+                    discarded.add(id(item))
+                    continue
+                primary_by_evidence[exact_key] = item
             primary_by_key.setdefault((item.source_page, _english_key(item.text)), item)
 
     for field in LABELED_FIELDS:

@@ -83,6 +83,7 @@ class OcrSpan(BaseModel):
 
     text: str = Field(min_length=1, max_length=500)
     box: BoundingBox
+    confidence: float | None = Field(default=None, ge=0, le=1)
 
     @model_validator(mode="after")
     def box_stays_on_page(self) -> OcrSpan:
@@ -150,6 +151,9 @@ class ImageAcquisitionReport(BaseModel):
     ocr_latency_ms: int = Field(default=0, ge=0)
     translation_latency_ms: int = Field(default=0, ge=0)
     semantic_latency_ms: int = Field(default=0, ge=0)
+    extraction_latency_ms: int = Field(default=0, ge=0)
+    english_repair_latency_ms: int = Field(default=0, ge=0)
+    coverage_latency_ms: int = Field(default=0, ge=0)
     total_latency_ms: int = Field(default=0, ge=0)
 
 

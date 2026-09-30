@@ -1,8 +1,43 @@
 import type { AnalysisResult, ClientOcrPage, DemoSummary, ImageDemoSummary, NoticeData } from '../types'
 
+export interface SourceCorrection {
+  page: number | null
+  line: number | null
+  text: string
+  reason: string
+}
+
+export class ApiError extends Error {
+  readonly status: number
+  readonly code: string | null
+  readonly corrections: SourceCorrection[]
+
+  constructor(message: string, status: number, code: string | null = null, corrections: SourceCorrection[] = []) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+    this.corrections = corrections
+  }
+}
+
+function sourceCorrections(value: unknown): SourceCorrection[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item: unknown) => {
+    if (!item || typeof item !== 'object' || !('text' in item) || !('reason' in item)
+      || typeof item.text !== 'string' || typeof item.reason !== 'string') return []
+    const page = 'page' in item && typeof item.page === 'number' && Number.isInteger(item.page) && item.page > 0 ? item.page : null
+    const line = 'line' in item && typeof item.line === 'number' && Number.isInteger(item.line) && item.line > 0 ? item.line : null
+    return [{ page, line, text: item.text, reason: item.reason }]
+  })
+}
+
 function errorMessage(body: unknown, fallback: string): string {
   if (!body || typeof body !== 'object' || !('detail' in body)) return fallback
   if (typeof body.detail === 'string') return body.detail
+  if (body.detail && typeof body.detail === 'object' && 'message' in body.detail && typeof body.detail.message === 'string') {
+    return body.detail.message
+  }
   if (Array.isArray(body.detail)) {
     return body.detail.map((item) => item && typeof item === 'object' && 'msg' in item ? String(item.msg) : 'Invalid input').join('; ')
   }
@@ -13,7 +48,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options)
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null)
-    throw new Error(errorMessage(body, response.statusText || 'The request failed.'))
+    const detail = body && typeof body === 'object' && 'detail' in body ? body.detail : null
+    const code = detail && typeof detail === 'object' && 'code' in detail && typeof detail.code === 'string' ? detail.code : null
+    const corrections = detail && typeof detail === 'object' && 'corrections' in detail ? sourceCorrections(detail.corrections) : []
+    throw new ApiError(errorMessage(body, response.statusText || 'The request failed.'), response.status, code, corrections)
   }
   return response.json() as Promise<T>
 }

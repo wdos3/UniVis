@@ -55,7 +55,7 @@ def split_recovered_pages(text: str, page_count: int) -> list[str]:
     return pages
 
 
-def _matches_page_evidence(evidence: str, page_text: str) -> bool:
+def evidence_matches_page(evidence: str, page_text: str) -> bool:
     evidence_lines = [re.sub(r"\s+", "", line) for line in evidence.splitlines() if line.strip()]
     if not evidence_lines:
         return False
@@ -100,7 +100,7 @@ def add_page_provenance(notice: NoticeData, recovered_pages: list[str], source_p
         matching_pages = [
             number
             for number, page_text in page_texts.items()
-            if _matches_page_evidence(evidence, page_text)
+            if evidence_matches_page(evidence, page_text)
         ]
         if len(matching_pages) != 1:
             item.source_page = None

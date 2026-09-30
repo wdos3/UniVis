@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api } from './client'
+import { api, ApiError } from './client'
 
 describe('client-side OCR analysis request', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -34,5 +34,24 @@ describe('client-side OCR analysis request', () => {
 
     await expect(api.analyzeClientOcr([{ text: 'too long' }], 1, 'auto', 'uploaded_image'))
       .rejects.toThrow('OCR text is too long')
+  })
+
+  it('preserves actionable source correction details from the completeness gate', async () => {
+    const corrections = [{ page: 1, line: 47, text: '문의:02.710.25n0', reason: 'The telephone number contains an unreadable character. Retype it from the photo.' }]
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: {
+      code: 'source_correction_required', message: 'Correct the contact number before retrying.', corrections,
+    } }), { status: 422, headers: { 'Content-Type': 'application/json' } })))
+
+    const error = await api.analyzeClientOcr([{ text: '문의:02.710.25n0' }], 1, 'auto', 'uploaded_image').catch((problem: unknown) => problem)
+    expect(error).toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({ status: 422, code: 'source_correction_required', message: 'Correct the contact number before retrying.', corrections })
+  })
+
+  it('discards malformed correction hints without hiding the error message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: {
+      message: 'Review source text.', corrections: [{ text: 42, reason: 'Wrong shape' }, { page: -1, line: '3', text: '원문', reason: 'Check the source.' }],
+    } }), { status: 422, headers: { 'Content-Type': 'application/json' } })))
+    const error = await api.analyze('원문', 'auto').catch((problem: unknown) => problem)
+    expect(error).toMatchObject({ message: 'Review source text.', corrections: [{ page: null, line: null, text: '원문', reason: 'Check the source.' }] })
   })
 })

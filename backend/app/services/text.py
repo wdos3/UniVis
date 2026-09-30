@@ -24,7 +24,7 @@ def _action_line(action: Action) -> str:
     if action.location:
         parts.append(f"Where: {action.location}")
     if action.required_items:
-        parts.append(f"Bring: {', '.join(action.required_items)}")
+        parts.append(f"Required items: {', '.join(action.required_items)}")
     return " — ".join(parts)
 
 
@@ -83,6 +83,4 @@ def simplified_text(notice: NoticeData) -> str:
                 [" · ".join(filter(None, (c.name, c.phone, c.email, c.details))) for c in notice.contacts],
             )
         )
-    if not notice.actions:
-        sections.append(("Action", ["This notice appears primarily informational. No required action was identified."]))
     return "\n\n".join(f"{title}\n" + "\n".join(f"- {line}" for line in lines) for title, lines in sections)

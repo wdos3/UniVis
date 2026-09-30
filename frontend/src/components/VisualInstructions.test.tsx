@@ -40,9 +40,18 @@ describe('VisualInstructions', () => {
       },
     }
     render(<VisualInstructions result={detailed} />)
-    expect(screen.getByText('Bring: TOEIC score')).toBeInTheDocument()
+    expect(screen.getByText('Required items: TOEIC score')).toBeInTheDocument()
     expect(screen.getByText('Three-month probation period')).toBeInTheDocument()
     expect(screen.getByText('Employment')).toBeInTheDocument()
     expect(screen.getByText('Activity stipend: KRW 200,000 per student')).toBeInTheDocument()
+  })
+
+  it('does not infer information-only status when submission instructions are in audited details', () => {
+    render(<VisualInstructions result={{ ...result, notice: {
+      ...result.notice, actions: [],
+      key_details: [{ ...grounded, text: 'Submit the application through S Plus.', label: 'Application detail' }],
+    } }} />)
+    expect(screen.getByText('Submit the application through S Plus.')).toBeInTheDocument()
+    expect(screen.queryByText('Information only')).not.toBeInTheDocument()
   })
 })

@@ -105,6 +105,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .ocr-correction-pages label > span { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ocr-correction-pages a { color: var(--green-dark); font-size: .7rem; }
 .ocr-correction-pages textarea { width: 100%; min-height: 130px; max-height: 420px; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: white; font-family: inherit; font-size: .77rem; line-height: 1.5; font-weight: 400; }
+.ocr-correction-requests { margin: 12px 0; color: var(--ink); font-size: .78rem; }
+.ocr-correction-requests ol { padding-left: 22px; display: grid; gap: 12px; }
+.ocr-correction-requests li > span { color: var(--muted); font-size: .7rem; }
+.ocr-correction-requests blockquote { margin: 5px 0; padding: 7px 10px; border-left: 3px solid #d4c1a9; background: #faf6ef; overflow-wrap: anywhere; }
+.ocr-correction-requests p { margin: 5px 0; line-height: 1.5; }
+.photo-timings { margin: 12px 0; padding: 10px 12px; background: #f7faf8; border: 1px solid var(--line); border-radius: 7px; font-size: .75rem; color: var(--ink); }
+.photo-timings summary { cursor: pointer; font-weight: 700; }
+.photo-timings dl { margin: 10px 0; display: grid; gap: 6px; }
+.photo-timings dl > div { display: flex; justify-content: space-between; gap: 15px; }
+.photo-timings dd { margin: 0; font-variant-numeric: tabular-nums; }
+.photo-timings p { margin: 8px 0 0; color: var(--muted); line-height: 1.5; }
 .image-demo-strip { margin-top: 18px; padding-top: 14px; border-top: 1px dashed #b8d0c9; }.image-demo-strip > span { color: var(--muted); font-size: .64rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; }.image-demo-strip > div { display: flex; gap: 7px; overflow-x: auto; margin-top: 8px; padding-bottom: 3px; }.image-demo-strip button { min-width: 180px; display: flex; gap: 8px; text-align: left; padding: 9px; border: 1px solid #bfd6cf; border-radius: 7px; color: var(--ink); background: rgba(255,255,255,.75); }.image-demo-strip button > svg { flex: 0 0 auto; color: var(--green); }.image-demo-strip button span { display: grid; gap: 2px; }.image-demo-strip button strong { font-size: .68rem; }.image-demo-strip button small { color: var(--muted); font-size: .58rem; line-height: 1.35; }
 .image-demo-strip p { margin: 6px 0 0; color: var(--muted); font-size: .68rem; line-height: 1.45; }
 .input-divider { display: flex; align-items: center; gap: 12px; margin: 4px 0 14px; color: var(--muted); font-size: .67rem; text-transform: uppercase; letter-spacing: .07em; }.input-divider::before, .input-divider::after { content: ''; height: 1px; background: var(--line); flex: 1; }

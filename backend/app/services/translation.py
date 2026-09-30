@@ -115,15 +115,31 @@ class MyMemoryTranslationProvider(TranslationProvider):
         response = await client.get(self.endpoint, params=params, timeout=self.timeout)
         response.raise_for_status()
         payload = response.json()
+        if not isinstance(payload, dict):
+            raise TranslationError(
+                "MyMemory returned a malformed translation response. Retry the notice analysis."
+            )
         if int(payload.get("responseStatus", response.status_code)) != 200:
             raise TranslationError(str(payload.get("responseDetails") or "MyMemory rejected the translation request."))
-        translated = html.unescape(str(payload.get("responseData", {}).get("translatedText", ""))).strip()
+        if payload.get("quotaFinished") is True:
+            raise TranslationError(
+                "MyMemory's temporary translation quota was reached. Retry later or configure another translation provider."
+            )
+        data = payload.get("responseData")
+        if not isinstance(data, dict) or not isinstance(
+            data.get("translatedText"), str
+        ):
+            raise TranslationError(
+                "MyMemory returned a malformed translation response. Retry the notice analysis."
+            )
+        translated = html.unescape(data["translatedText"]).strip()
         if not translated:
             raise TranslationError("MyMemory returned an empty translation.")
         return translated
 
     async def translate(self, text: str, source_language: str, target_language: str) -> TranslationResult:
         chunks = split_utf8_chunks(text)
+        unique_chunks = list(dict.fromkeys(chunks))
         try:
             concurrency = max(1, int(os.getenv("TRANSLATION_CONCURRENCY", "4")))
             semaphore = asyncio.Semaphore(concurrency)
@@ -132,14 +148,34 @@ class MyMemoryTranslationProvider(TranslationProvider):
                 async with semaphore:
                     return await self._translate_chunk(chunk, source_language, target_language, client)
 
+            async def translate_all(client: httpx.AsyncClient) -> list[str]:
+                tasks = [
+                    asyncio.create_task(translate_chunk(chunk, client))
+                    for chunk in unique_chunks
+                ]
+                try:
+                    return await asyncio.gather(*tasks)
+                finally:
+                    # Stop queued requests after a failed chunk rather than consuming
+                    # the free quota for a result that cannot be returned.
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+
             if self.client is not None:
-                translated = await asyncio.gather(*(translate_chunk(chunk, self.client) for chunk in chunks))
+                translated = await translate_all(self.client)
             else:
                 async with httpx.AsyncClient() as client:
-                    translated = await asyncio.gather(*(translate_chunk(chunk, client) for chunk in chunks))
+                    translated = await translate_all(client)
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             raise TranslationError("The temporary MyMemory translation service is unavailable or its quota was reached.") from exc
-        return TranslationResult(text="\n\n".join(translated), provider=self.name, request_count=len(chunks))
+        translations = dict(zip(unique_chunks, translated))
+        return TranslationResult(
+            text="\n\n".join(translations[chunk] for chunk in chunks),
+            provider=self.name,
+            request_count=len(unique_chunks),
+        )
 
 
 class LibreTranslateProvider(TranslationProvider):
@@ -163,7 +199,14 @@ class LibreTranslateProvider(TranslationProvider):
                 async with httpx.AsyncClient() as client:
                     response = await client.post(self.endpoint, json=body, timeout=self.timeout)
             response.raise_for_status()
-            translated = str(response.json().get("translatedText", "")).strip()
+            payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(
+                payload.get("translatedText"), str
+            ):
+                raise TranslationError(
+                    "LibreTranslate returned a malformed translation response. Retry the notice analysis."
+                )
+            translated = payload["translatedText"].strip()
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             raise TranslationError("The configured LibreTranslate service could not translate this notice.") from exc
         if not translated:
