@@ -28,6 +28,11 @@ function ContactLine({ contact }: { contact: Contact }) {
 
 export function VisualInstructions({ result, showEvidence = false, compact = false }: VisualProps) {
   const n = result.notice
+  const detailGroups = new Map<string, LabeledFact[]>()
+  for (const item of n.key_details) {
+    const label = item.label.trim() || 'Other key details'
+    detailGroups.set(label, [...(detailGroups.get(label) ?? []), item])
+  }
   const [evidenceItem, setEvidenceItem] = useState<GroundedItem | null>(null)
   const evidencePage = result.source_pages.find((page) => page.page_number === evidenceItem?.source_page)
   const warningItems: LabeledFact[] = [...n.warnings, ...n.exceptions, ...n.consequences]
@@ -93,20 +98,21 @@ export function VisualInstructions({ result, showEvidence = false, compact = fal
 
       {noAction && <section className="visual-card neutral-card"><CardTitle icon={BadgeInfo}>Information only</CardTitle><p>This notice appears primarily informational. No required action was identified.</p></section>}
 
-      {n.key_details.length > 0 && <section className="visual-card info-card">
-        <CardTitle icon={BadgeInfo}>Other key details</CardTitle>
-        <FactList items={n.key_details} showEvidence={showEvidence} onViewImage={setEvidenceItem} />
-      </section>}
+      {[...detailGroups].map(([label, items]) => <section className="visual-card info-card" key={label}>
+        <CardTitle icon={BadgeInfo}>{label}</CardTitle>
+        <FactList items={items} showEvidence={showEvidence} onViewImage={setEvidenceItem} />
+      </section>)}
 
       {warningItems.length > 0 && <section className="visual-card warning-card">
         <CardTitle icon={ShieldAlert}>Important</CardTitle>
         {warningItems.map((item, index) => <div className="warning-row" key={`${item.text}-${index}`}><AlertTriangle size={18} aria-hidden="true" /><div><strong>{item.text}</strong><Evidence item={item} visible={showEvidence} onViewImage={setEvidenceItem} /></div></div>)}
       </section>}
 
-      {(n.locations.length > 0 || n.contacts.length > 0 || n.fees.length > 0 || n.links.length > 0) && <section className="info-grid">
+      {(n.locations.length > 0 || n.contacts.length > 0 || n.fees.length > 0 || n.financial_support.length > 0 || n.links.length > 0) && <section className="info-grid">
         {n.locations.length > 0 && <div className="visual-card info-card"><CardTitle icon={MapPin}>Location</CardTitle><FactList items={n.locations} showEvidence={showEvidence} onViewImage={setEvidenceItem} /></div>}
         {n.contacts.length > 0 && <div className="visual-card info-card"><CardTitle icon={Phone}>Contact</CardTitle>{n.contacts.map((contact, index) => <div key={index}><ContactLine contact={contact} /><Evidence item={contact} visible={showEvidence} onViewImage={setEvidenceItem} /></div>)}</div>}
         {n.fees.length > 0 && <div className="visual-card info-card"><CardTitle icon={CreditCard}>Fee</CardTitle><FactList items={n.fees} showEvidence={showEvidence} onViewImage={setEvidenceItem} /></div>}
+        {n.financial_support.length > 0 && <div className="visual-card info-card"><CardTitle icon={CreditCard}>Financial support</CardTitle><FactList items={n.financial_support} showEvidence={showEvidence} onViewImage={setEvidenceItem} /></div>}
         {n.links.length > 0 && <div className="visual-card info-card"><CardTitle icon={Globe2}>Online</CardTitle><FactList items={n.links} showEvidence={showEvidence} onViewImage={setEvidenceItem} /></div>}
       </section>}
 

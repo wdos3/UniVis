@@ -19,6 +19,7 @@ def _represented_ids(notice: NoticeData) -> set[str]:
         + notice.locations
         + notice.contacts
         + notice.fees
+        + notice.financial_support
         + notice.links
         + notice.key_details
         + notice.conditional_groups
@@ -34,7 +35,7 @@ def _unmapped_source_lines(notice: NoticeData, source_text: str) -> list[str]:
     groups = (
         notice.audience + notice.actions + notice.deadlines + notice.required_documents
         + notice.eligibility + notice.exceptions + notice.warnings + notice.consequences
-        + notice.locations + notice.contacts + notice.fees + notice.links
+        + notice.locations + notice.contacts + notice.fees + notice.financial_support + notice.links
         + notice.key_details + notice.conditional_groups
     )
     evidence = [re.sub(r"\s+", "", item.source_evidence) for item in groups if item.source_evidence]
@@ -78,8 +79,6 @@ def calculate_fidelity(notice: NoticeData, source_text: str = "") -> FidelityRep
         warnings.append("Some critical source facts are not represented in output elements")
     if invented:
         warnings.append("Some output elements reference unknown source facts")
-    if unmapped_lines:
-        warnings.append(f"{len(unmapped_lines)} OCR line(s) are not linked to a structured output item; review the original notice.")
 
     return FidelityReport(
         checks=checks,
@@ -103,7 +102,7 @@ def select_templates(notice: NoticeData) -> TemplateSelection:
         timeline=len(notice.deadlines) >= 2,
         decision_tree=has_branch or bool(notice.conditional_groups),
         warning_cards=bool(notice.warnings or notice.exceptions or notice.consequences),
-        information_cards=bool(notice.locations or notice.contacts or notice.fees or notice.links or notice.key_details),
+        information_cards=bool(notice.locations or notice.contacts or notice.fees or notice.financial_support or notice.links or notice.key_details),
     )
     overrides = notice.template_overrides.model_dump(exclude_none=True)
     return selection.model_copy(update=overrides)

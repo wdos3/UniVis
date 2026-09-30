@@ -7,11 +7,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from openai import AsyncOpenAI
+from pydantic import BaseModel, ConfigDict
 
-from app.models import DocumentRequirement, NoticeData, ReviewState
+from app.models import DocumentRequirement, GroundedItem, NoticeData, ReviewState
 from app.services.demos import match_demo
 from app.services.extraction.reconciliation import exact_values
-from app.services.text import appears_korean
+from app.services.grounded_wording import correct_grounded_wording
 
 
 class SemanticError(RuntimeError):
@@ -27,6 +28,14 @@ class SemanticResult:
     output_tokens: int = 0
     total_tokens: int = 0
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class SemanticRepairMetrics:
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
 
 
 class SemanticProvider(ABC):
@@ -71,11 +80,15 @@ SYSTEM_PROMPT = """You convert Korean-language notices into typed, evidence-grou
 The Korean OCR text is the evidence authority. The English translation is a reading aid and may contain errors.
 The OCR source can contain labeled, overlapping OCR passes. Reconcile their duplicate lines; do not treat repeated content as separate facts.
 Never infer missing facts. Preserve every date, time, amount, qualification, exception, optional condition, contact, URL, and table-row distinction.
+Keep Latin acronyms exactly as printed. Do not expand an acronym unless its expansion is explicitly present in the source.
 Spatial OCR hints give text positions on a 0-1000 page grid. In a table, pair a heading and its value by horizontal alignment, not by the OCR or translation reading order. If alignment is uncertain, report the unpaired text for review instead of guessing.
 Extract all applicant requirements and score options, work or program duties, preferred qualifications, process stages, employment terms, and application-writing restrictions. Use key_details for grounded information that has no more specific field. A short summary is not a substitute for these details.
 User-facing text must be in the requested target language. Keep Korean only in source_evidence and source_facts.source_text. Do not output "N/A" for absent contact fields; leave them empty.
+For English output, translate every user-facing Korean phrase yourself even if the temporary translation is garbled. Never copy Korean OCR wording into a user-facing field.
+Money awarded or reimbursed to participants belongs in financial_support. Use fees only for money applicants must pay. Keep these directions of payment distinct.
+When a notice says to visit an institute for card payment of funded research purchases, describe that as a funding-use procedure, not merely as a location.
 Create sequential source facts F001, F002, and so on. Every actionable or factual output item must reference valid source_fact_ids and quote Korean source_evidence exactly.
-Every critical source fact must be represented by at least one grounded output item: use fees for amounts, deadlines for dates, eligibility/audience for qualifications, actions for submission details, warnings/consequences for payment conditions or restrictions, contacts/links for contact data, and key_details for other factual sections. Do not leave a critical source fact referenced only by source_facts.
+Every critical source fact must be represented by at least one grounded output item: use financial_support for funding and fees for payments owed, deadlines for dates, eligibility/audience for qualifications, actions for submission details, warnings/consequences for payment conditions or restrictions, contacts/links for contact data, and key_details for other factual sections. Do not leave a critical source fact referenced only by source_facts.
 For a table-row pairing, source_evidence may quote its exact Korean header and value as separate lines. Mark the item needs_review if the source layout is ambiguous.
 Create one required_documents item per document, even when several documents share one source fact and evidence line.
 Set heading/title-only source facts to critical=false; critical means a fact that changes eligibility, money, dates, actions, documents, restrictions, or contact details.
@@ -120,22 +133,227 @@ class OpenAISemanticProvider(SemanticProvider):
         if response.output_parsed is None:
             raise SemanticError("The OpenAI semantic provider returned no parseable structured output.")
         usage = getattr(response, "usage", None)
-        notice = normalize_notice(response.output_parsed)
+        # The requested language is API input, not a model decision. A model
+        # returning "ko" must not disable the English-output safeguards.
+        response.output_parsed.target_language = target_language
+        notice = normalize_notice(response.output_parsed, source_text=source_text)
+        repair = await repair_english_fields(notice, self.client, self.model)
+        if repair.requests:
+            notice.unverified_items = [
+                item for item in notice.unverified_items if item != _UNTRANSLATED_WARNING
+            ]
+            # The translation pass can introduce a fluent but incorrect term
+            # after the first normalization. Recheck the grounded English.
+            notice = normalize_notice(notice, source_text=source_text)
         return SemanticResult(
             notice=notice,
             provider=f"{self.name}:{self.model}",
-            requests=1,
-            input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
-            output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
-            total_tokens=int(getattr(usage, "total_tokens", 0) or 0),
+            requests=1 + repair.requests,
+            input_tokens=int(getattr(usage, "input_tokens", 0) or 0) + repair.input_tokens,
+            output_tokens=int(getattr(usage, "output_tokens", 0) or 0) + repair.output_tokens,
+            total_tokens=int(getattr(usage, "total_tokens", 0) or 0) + repair.total_tokens,
         )
 
 
-def normalize_notice(notice: NoticeData) -> NoticeData:
+_UNTRANSLATED_WARNING = "Some user-facing details remain in Korean; review the English translation before acting."
+_REPAIR_BATCH_SIZE = 40
+_KOREAN_SCRIPT = re.compile(r"[\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uAC00-\uD7AF\uD7B0-\uD7FF]")
+_CLOCK_TIME = re.compile(
+    r"(?<!\d)(?:(오전|오후|AM|PM)\s*)?(\d{1,2}):([0-5]\d)(?:\s*(AM|PM|오전|오후))?(?!\d)",
+    re.IGNORECASE,
+)
+_KOREAN_HOUR = re.compile(r"(?<!\d)(?:(오전|오후)\s*)?(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분)?")
+_ENGLISH_HOUR = re.compile(r"(?<!\d)(\d{1,2})\s*(AM|PM)\b", re.IGNORECASE)
+_PHONE_IN_EVIDENCE = re.compile(
+    r"(?<![\w])(?:\+\d{1,3}[. -]?)?\(?\d{1,4}\)?[. -]?\d{3,4}[. -]?\d{4}(?![\w])"
+)
+_PHONE_REVIEW_NOTE = "Phone number does not match the cited source text; verify it against the notice."
+
+
+def _clock_minutes(hour: int, minute: int, meridiem: str | None) -> int | None:
+    if minute > 59:
+        return None
+    if meridiem:
+        if not 1 <= hour <= 12:
+            return None
+        hour = hour % 12 + (12 if meridiem.casefold() in {"pm", "오후"} else 0)
+    elif not 0 <= hour <= 23:
+        return None
+    return hour * 60 + minute
+
+
+def _explicit_times(text: str) -> set[int]:
+    times: set[int] = set()
+    for match in _CLOCK_TIME.finditer(text):
+        value = _clock_minutes(int(match[2]), int(match[3]), match[1] or match[4])
+        if value is not None:
+            times.add(value)
+    for match in _KOREAN_HOUR.finditer(text):
+        value = _clock_minutes(int(match[2]), int(match[3] or 0), match[1])
+        if value is not None:
+            times.add(value)
+    for match in _ENGLISH_HOUR.finditer(text):
+        value = _clock_minutes(int(match[1]), 0, match[2])
+        if value is not None:
+            times.add(value)
+    return times
+
+
+def _phone_digits(value: str) -> str | None:
+    if not re.fullmatch(r"\+?[\d().\s-]{7,}", value):
+        return None
+    digits = re.sub(r"\D", "", value)
+    if not 9 <= len(digits) <= 15:
+        return None
+    if value.strip().startswith("+82") and digits.startswith("82"):
+        return f"0{digits[2:]}"
+    return digits
+
+
+def _phone_matches_evidence(phone: str, evidence: str) -> bool:
+    wanted = _phone_digits(phone)
+    return bool(wanted) and any(
+        _phone_digits(candidate.group()) == wanted
+        for candidate in _PHONE_IN_EVIDENCE.finditer(evidence)
+    )
+
+
+def _contains_korean_script(value: str) -> bool:
+    return bool(_KOREAN_SCRIPT.search(value))
+
+
+class _EnglishRepair(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    english: str
+
+
+class _EnglishRepairBatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repairs: list[_EnglishRepair]
+
+
+@dataclass(frozen=True)
+class _TextField:
+    owner: BaseModel
+    name: str
+    index: int | None = None
+
+    @property
+    def text(self) -> str:
+        value = getattr(self.owner, self.name)
+        return value[self.index] if self.index is not None else value
+
+    def replace(self, text: str) -> None:
+        if self.index is None:
+            setattr(self.owner, self.name, text)
+        else:
+            getattr(self.owner, self.name)[self.index] = text
+        if isinstance(self.owner, GroundedItem):
+            self.owner.state = ReviewState.NEEDS_REVIEW
+
+
+def _user_facing_text_fields(notice: NoticeData) -> list[_TextField]:
+    fields = [_TextField(notice, name) for name in ("title", "notice_type", "purpose", "summary")]
+    for collection_name in (
+        "audience", "eligibility", "exceptions", "warnings", "consequences",
+        "locations", "fees", "financial_support", "links", "key_details",
+    ):
+        for item in getattr(notice, collection_name):
+            fields.extend((_TextField(item, "text"), _TextField(item, "label")))
+    for action in notice.actions:
+        fields.extend(_TextField(action, name) for name in ("action", "details", "deadline", "location"))
+        fields.extend(_TextField(action, "required_items", index) for index in range(len(action.required_items)))
+    for deadline in notice.deadlines:
+        fields.extend(_TextField(deadline, name) for name in ("date", "time", "description"))
+    for document in notice.required_documents:
+        fields.extend((_TextField(document, "name"), _TextField(document, "condition")))
+    for contact in notice.contacts:
+        fields.extend(_TextField(contact, name) for name in ("name", "phone", "email", "details"))
+    for group in notice.conditional_groups:
+        fields.extend(_TextField(group, name) for name in ("group", "application_period", "details"))
+    for name in ("ambiguities", "unverified_items"):
+        fields.extend(_TextField(notice, name, index) for index in range(len(getattr(notice, name))))
+    return [field for field in fields if field.text and _contains_korean_script(field.text)]
+
+
+async def repair_english_fields(
+    notice: NoticeData, client: AsyncOpenAI, model: str
+) -> SemanticRepairMetrics:
+    """Translate only untranslated display fields; provenance remains in Korean."""
+    if notice.target_language != "en":
+        return SemanticRepairMetrics()
+    fields = _user_facing_text_fields(notice)
+    if not fields:
+        return SemanticRepairMetrics()
+
+    requests = input_tokens = output_tokens = total_tokens = 0
+    for offset in range(0, len(fields), _REPAIR_BATCH_SIZE):
+        batch = fields[offset:offset + _REPAIR_BATCH_SIZE]
+        by_id = {f"T{offset + index + 1:03d}": reference for index, reference in enumerate(batch)}
+        payload = [{"id": id_, "text": reference.text} for id_, reference in by_id.items()]
+        try:
+            response = await client.responses.parse(
+                model=model,
+                input=[
+                    {"role": "system", "content": (
+                        "Translate each notice field to natural English. Return exactly one repair per input ID. "
+                        "Preserve all conditions, negation, numbers, units, dates, and proper names. "
+                        "Do not summarize, combine fields, infer missing facts, or add information. "
+                        "Retain existing English where appropriate, but write no Hangul in the english field."
+                    )},
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ],
+                text_format=_EnglishRepairBatch,
+            )
+        except Exception as exc:
+            raise SemanticError("The semantic provider could not finish translating the English summary.") from exc
+        parsed = response.output_parsed
+        if parsed is None or len(parsed.repairs) != len(by_id):
+            raise SemanticError("The semantic provider returned an incomplete English summary.")
+        repaired = {item.id: item.english.strip() for item in parsed.repairs}
+        if set(repaired) != set(by_id) or any(not value or _contains_korean_script(value) for value in repaired.values()):
+            raise SemanticError("The semantic provider returned untranslated or mismatched English fields.")
+        for id_, reference in by_id.items():
+            reference.replace(repaired[id_])
+        usage = getattr(response, "usage", None)
+        requests += 1
+        input_tokens += int(getattr(usage, "input_tokens", 0) or 0)
+        output_tokens += int(getattr(usage, "output_tokens", 0) or 0)
+        total_tokens += int(getattr(usage, "total_tokens", 0) or 0)
+    if _user_facing_text_fields(notice):
+        raise SemanticError("The semantic provider left untranslated Korean in the English summary.")
+    return SemanticRepairMetrics(requests, input_tokens, output_tokens, total_tokens)
+
+
+def normalize_notice(notice: NoticeData, *, source_text: str = "") -> NoticeData:
     """Apply conservative, deterministic cleanup that does not invent source content."""
+    if source_text:
+        notice.purpose = correct_grounded_wording(notice.purpose, source_text)
+        notice.summary = correct_grounded_wording(notice.summary, source_text)
     for fact in notice.source_facts:
         if fact.kind.strip().lower() in {"heading", "title", "program_title", "notice_title"}:
             fact.critical = False
+
+    # A card payment can describe how the institute spends a research grant;
+    # it does not by itself make that grant a fee charged to applicants.
+    payable_terms = re.compile(r"납부|부담|입금|납입|수수료|등록금|참가비")
+    support_terms = re.compile(r"연구비|활동비|장학금|지원금액")
+    remaining_fees = []
+    for fee in notice.fees:
+        if support_terms.search(fee.source_evidence) and not payable_terms.search(fee.source_evidence):
+            fee.text = re.sub(r"(?i)\bResearch fee\b", "Research funding", fee.text)
+            fee.text = re.sub(r"(?i)\bActivity fee\b", "Activity allowance", fee.text)
+            notice.financial_support.append(fee)
+        else:
+            remaining_fees.append(fee)
+    notice.fees = remaining_fees
+
+    for item in notice.key_details:
+        if item.label.strip().casefold() in {"key_details", "other"}:
+            item.label = "Other key details"
 
     if len(notice.required_documents) == 1:
         combined = notice.required_documents[0]
@@ -164,9 +382,21 @@ def normalize_notice(notice: NoticeData) -> NoticeData:
                 for item in matching_action.required_items
             ]
 
+    for deadline in notice.deadlines:
+        if deadline.time.strip():
+            stated_times = _explicit_times(deadline.time)
+            if not stated_times or not stated_times <= _explicit_times(deadline.source_evidence):
+                deadline.time = ""
+                deadline.state = ReviewState.NEEDS_REVIEW
+
     for contact in notice.contacts:
         if contact.phone.strip().lower() in {"n/a", "none", "not provided"}:
             contact.phone = ""
+        if contact.phone and not _phone_matches_evidence(contact.phone, contact.source_evidence):
+            contact.phone = ""
+            if _PHONE_REVIEW_NOTE not in contact.details:
+                contact.details = f"{contact.details} {_PHONE_REVIEW_NOTE}".strip()
+            contact.state = ReviewState.NEEDS_REVIEW
         if contact.email.strip().lower() in {"n/a", "none", "not provided"}:
             contact.email = ""
         if contact.email and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[A-Za-z]{2,}", contact.email):
@@ -175,37 +405,60 @@ def normalize_notice(notice: NoticeData) -> NoticeData:
             contact.details = f"{contact.details} OCR email needs review: {suspect}".strip()
             contact.state = ReviewState.NEEDS_REVIEW
 
-    untranslated = any(appears_korean(value) for value in (notice.title, notice.summary, notice.purpose))
+    untranslated = any(_contains_korean_script(value) for value in (notice.title, notice.summary, notice.purpose, notice.notice_type))
     text_items = (
         notice.audience + notice.eligibility + notice.exceptions + notice.warnings
-        + notice.consequences + notice.locations + notice.fees + notice.links + notice.key_details
+        + notice.consequences + notice.locations + notice.fees + notice.financial_support
+        + notice.links + notice.key_details
     )
     for item in text_items:
-        if appears_korean(item.text):
+        corrected_text = correct_grounded_wording(item.text, item.source_evidence)
+        corrected_label = correct_grounded_wording(item.label, item.source_evidence)
+        if (corrected_text, corrected_label) != (item.text, item.label):
+            item.text, item.label = corrected_text, corrected_label
+            item.state = ReviewState.NEEDS_REVIEW
+        if _contains_korean_script(item.text) or _contains_korean_script(item.label):
             item.state = ReviewState.NEEDS_REVIEW
             untranslated = True
     for action in notice.actions:
-        if any(appears_korean(value) for value in (action.action, action.details, *action.required_items)):
+        corrected_action = correct_grounded_wording(action.action, action.source_evidence)
+        corrected_details = correct_grounded_wording(action.details, action.source_evidence)
+        corrected_items = [
+            correct_grounded_wording(value, action.source_evidence) for value in action.required_items
+        ]
+        if (corrected_action, corrected_details, corrected_items) != (
+            action.action, action.details, action.required_items
+        ):
+            action.action = corrected_action
+            action.details = corrected_details
+            action.required_items = corrected_items
+            action.state = ReviewState.NEEDS_REVIEW
+        if any(_contains_korean_script(value) for value in (action.action, action.details, *action.required_items)):
             action.state = ReviewState.NEEDS_REVIEW
             untranslated = True
     for document in notice.required_documents:
-        if any(appears_korean(value) for value in (document.name, document.condition)):
+        corrected_name = correct_grounded_wording(document.name, document.source_evidence)
+        corrected_condition = correct_grounded_wording(document.condition, document.source_evidence)
+        if (corrected_name, corrected_condition) != (document.name, document.condition):
+            document.name, document.condition = corrected_name, corrected_condition
+            document.state = ReviewState.NEEDS_REVIEW
+        if any(_contains_korean_script(value) for value in (document.name, document.condition)):
             document.state = ReviewState.NEEDS_REVIEW
             untranslated = True
     for deadline in notice.deadlines:
-        if any(appears_korean(value) for value in (deadline.date, deadline.time, deadline.description)):
+        if any(_contains_korean_script(value) for value in (deadline.date, deadline.time, deadline.description)):
             deadline.state = ReviewState.NEEDS_REVIEW
             untranslated = True
     for contact in notice.contacts:
-        if any(appears_korean(value) for value in (contact.name, contact.details)):
+        if any(_contains_korean_script(value) for value in (contact.name, contact.details)):
             contact.state = ReviewState.NEEDS_REVIEW
             untranslated = True
     for group in notice.conditional_groups:
-        if any(appears_korean(value) for value in (group.group, group.application_period, group.details)):
+        if any(_contains_korean_script(value) for value in (group.group, group.application_period, group.details)):
             group.state = ReviewState.NEEDS_REVIEW
             untranslated = True
     if untranslated and notice.target_language == "en":
-        notice.unverified_items.append("Some user-facing details remain in Korean; review the English translation before acting.")
+        notice.unverified_items.append(_UNTRANSLATED_WARNING)
     return notice
 
 

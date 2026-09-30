@@ -60,6 +60,7 @@ export interface NoticeData {
   locations: LabeledFact[]
   contacts: Contact[]
   fees: LabeledFact[]
+  financial_support: LabeledFact[]
   links: LabeledFact[]
   key_details: LabeledFact[]
   conditional_groups: ConditionalGroup[]

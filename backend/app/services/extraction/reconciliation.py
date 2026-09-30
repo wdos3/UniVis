@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 from app.models import NoticeData, ReviewState, SourcePage
 
@@ -54,6 +55,20 @@ def split_recovered_pages(text: str, page_count: int) -> list[str]:
     return pages
 
 
+def _matches_page_evidence(evidence: str, page_text: str) -> bool:
+    evidence_lines = [re.sub(r"\s+", "", line) for line in evidence.splitlines() if line.strip()]
+    if not evidence_lines:
+        return False
+    if len(evidence_lines) == 1:
+        return evidence_lines[0] in re.sub(r"\s+", "", page_text)
+
+    # Coverage repair cites complete OCR lines, which need not be adjacent in
+    # the recovered reading order. Every cited line must still occur on this
+    # page; matching only a few words would give misleading provenance.
+    page_lines = Counter(re.sub(r"\s+", "", line) for line in page_text.splitlines() if line.strip())
+    return all(page_lines[line] >= count for line, count in Counter(evidence_lines).items())
+
+
 def add_page_provenance(notice: NoticeData, recovered_pages: list[str], source_pages: list[SourcePage]) -> None:
     groups = (
         notice.audience
@@ -67,25 +82,25 @@ def add_page_provenance(notice: NoticeData, recovered_pages: list[str], source_p
         + notice.locations
         + notice.contacts
         + notice.fees
+        + notice.financial_support
         + notice.links
         + notice.key_details
         + notice.conditional_groups
         + notice.source_facts
     )
     page_by_number = {page.page_number: page for page in source_pages}
-    normalized_pages = {
-        page.page_number: re.sub(r"\s+", "", recovered_pages[page.page_number - 1])
+    page_texts = {
+        page.page_number: recovered_pages[page.page_number - 1]
         for page in source_pages
         if page.page_number <= len(recovered_pages)
     }
     uncertain = False
     for item in groups:
         evidence = getattr(item, "source_evidence", "") or getattr(item, "source_text", "")
-        normalized_evidence = re.sub(r"\s+", "", evidence)
         matching_pages = [
             number
-            for number, page_text in normalized_pages.items()
-            if normalized_evidence and normalized_evidence in page_text
+            for number, page_text in page_texts.items()
+            if _matches_page_evidence(evidence, page_text)
         ]
         if len(matching_pages) != 1:
             item.source_page = None
@@ -97,7 +112,7 @@ def add_page_provenance(notice: NoticeData, recovered_pages: list[str], source_p
             continue
 
         page_number = matching_pages[0]
-        if item.source_page != page_number:
+        if item.source_page != page_number or len([line for line in evidence.splitlines() if line.strip()]) > 1:
             item.bounding_box = None
         item.source_page = page_number
         source_page = page_by_number[page_number]
@@ -106,4 +121,6 @@ def add_page_provenance(notice: NoticeData, recovered_pages: list[str], source_p
             item.state = ReviewState.NEEDS_REVIEW
             uncertain = True
     if uncertain:
-        notice.unverified_items.append("Some source evidence could not be uniquely matched to a readable page; review highlighted facts.")
+        warning = "Some source evidence could not be uniquely matched to a readable page; review highlighted facts."
+        if warning not in notice.unverified_items:
+            notice.unverified_items.append(warning)

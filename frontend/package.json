@@ -13,6 +13,7 @@
   "dependencies": {
     "@paddleocr/paddleocr-js": "0.4.2",
     "@vitejs/plugin-react": "latest",
+    "jsqr": "1.4.0",
     "lucide-react": "^0.468.0",
     "react": "latest",
     "react-dom": "latest",

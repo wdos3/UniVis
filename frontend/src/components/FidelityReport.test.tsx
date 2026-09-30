@@ -14,6 +14,6 @@ describe('FidelityReport', () => {
     expect(screen.getByText('Identified critical facts')).toBeInTheDocument()
     expect(screen.getByText(/cannot detect facts the AI omitted/)).toBeInTheDocument()
     expect(screen.queryByText('Critical facts in source')).not.toBeInTheDocument()
-    expect(screen.getByText('1 OCR line(s) not mapped to the summary')).toBeInTheDocument()
+    expect(screen.queryByText('거시경제 조사·연구')).not.toBeInTheDocument()
   })
 })

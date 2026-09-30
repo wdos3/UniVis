@@ -20,8 +20,10 @@ The backend owns the canonical Pydantic schema; TypeScript mirrors it for render
 | `consequences` | grounded item[] | Explicit consequences only |
 | `locations` | grounded item[] | Physical or online locations |
 | `contacts` | contact[] | Office, phone, email, or details |
-| `fees` | grounded item[] | Amount, currency, purpose, and condition |
+| `fees` | grounded item[] | Payments applicants owe, with amount and condition |
+| `financial_support` | grounded item[] | Grants, allowances, or reimbursements awarded to participants |
 | `links` | grounded item[] | Source-provided URLs or named systems |
+| `key_details` | grounded item[] | Other grounded facts, including research topics and process details |
 | `conditional_groups` | conditional group[] | Separate group-specific dates or rules that must not be flattened |
 | `source_language` | string | Initially `ko` |
 | `target_language` | string | Initially `en` |

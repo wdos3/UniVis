@@ -73,7 +73,7 @@ def _remove_model_score_claims(notice: NoticeData) -> None:
     # The model sees OCR text in reading order, which is not reliable for table columns.
     for field in (
         "audience", "eligibility", "exceptions", "warnings", "consequences",
-        "locations", "fees", "links", "key_details",
+        "locations", "fees", "financial_support", "links", "key_details",
     ):
         setattr(notice, field, [item for item in getattr(notice, field) if not _model_score_claim(item.text)])
     for field in ("purpose", "summary"):
@@ -85,7 +85,7 @@ def _remove_model_score_claims(notice: NoticeData) -> None:
 def mark_unverified_language_scores(notice: NoticeData, source_text: str = "") -> None:
     """A text-only reprocess has no trustworthy column alignment for score pairs."""
     score_claims = [
-        item for field in ("audience", "eligibility", "exceptions", "warnings", "consequences", "locations", "fees", "links", "key_details")
+        item for field in ("audience", "eligibility", "exceptions", "warnings", "consequences", "locations", "fees", "financial_support", "links", "key_details")
         for item in getattr(notice, field) if _model_score_claim(item.text)
     ]
     for item in score_claims:

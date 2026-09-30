@@ -2,11 +2,11 @@
 
 ## Model and translation error
 
-OCR can corrupt Korean text, a free translator can mistranslate administrative language, and the semantic model can still omit or misclassify facts even when constrained by a schema. Version 2 deliberately uses one semantic call; the structural fidelity report is deterministic, not an independent semantic guarantee. Human bilingual review remains necessary.
+OCR can corrupt Korean text, a free translator can mistranslate administrative language, and the semantic model can still omit or misclassify facts even when constrained by a schema. Version 2 now uses an initial structured extraction, optional batched English-field repair calls, and a separate completeness audit that may make a targeted retry. These checks consume additional OpenAI tokens and time. A [schema-conforming response can still contain mistakes](https://developers.openai.com/api/docs/guides/structured-outputs); human bilingual review remains necessary.
 
 ## Source-fact coverage is structural
 
-Coverage detects missing and unknown fact references. It does not prove that an English statement correctly represents the Korean evidence. A wrong paraphrase can still point to the right fact ID. Page links and optional bounding boxes improve auditability but do not establish semantic correctness.
+The fidelity percentage detects missing and unknown references among facts the model identified. It cannot see facts missing from the model's inventory. A separate check compares recovered OCR lines with the English display fields that cite them; it can add grounded English details, or fail the analysis rather than publish a digest when the source remains unresolved. It cannot prove that the English meaning is correct, detect text that OCR never recovered, or make an ambiguous table pairing reliable. A wrong paraphrase can still cite the right source line. Page links and optional bounding boxes improve auditability but do not establish semantic correctness. Raw unmapped OCR lines are not presented as a substitute for a digest.
 
 ## Administrative and legal language
 
@@ -16,13 +16,19 @@ Visa, employment, tuition, and academic-status notices may have legal effects. T
 
 Image-quality detection is heuristic: it can miss glare, cutoff text, perspective distortion, or a notice that occupies too little of the frame, and it can warn on a usable page. The prototype applies EXIF rotation and mild enhancement but does not provide interactive cropping or full perspective correction.
 
-PaddleOCR is the primary image-text channel and runs locally with the lightweight PP-OCRv5 Korean recognizer. The first live image analysis needs network access to download the official model weights. PaddleOCR can still confuse similar Hangul glyphs, punctuation, QR-adjacent text, and perspective-distorted lines. Version 2 uses full-page and footer-detail passes and marks low-confidence lines for review; it does not claim reliable word-level bounding boxes. Page-level evidence is the reliable minimum.
+PaddleOCR is the primary image-text channel. The local Python/Docker route uses full-page and footer-detail passes and marks low-confidence lines for review. PaddleOCR can still confuse similar Hangul glyphs, punctuation, QR-adjacent text, and perspective-distorted lines; neither route guarantees reliable word-level bounding boxes. Page-level evidence is the reliable minimum.
 
 The hosted camera/image path runs PaddleOCR in the visitor's browser. First use
 must download the model/runtime assets, and inference depends on the device's
-CPU, memory, and browser support; the 10–15 second target is not guaranteed.
-This browser path currently sends OCR text to the API without the server's
-image-quality and QR checks or bounding boxes. Check the original photo against
+CPU, memory, and browser support; the 10–15 second end-to-end target has not
+been met on the tested dense photo. This route sends recovered text and bounded
+normalized text positions to the API, not photo bytes. The API only reorders a
+clearly positioned two-column section; it leaves sparse tables and ambiguous
+layouts alone. The browser also attempts to decode HTTP(S) QR URLs locally, but
+this is best-effort and never opens a link automatically. Unlike local
+Python/Docker image analysis, the hosted route does not run server-side image
+quality checks. A false OCR reading—including a plausible-looking phone
+number—may pass with high OCR confidence. Check the original photo against
 the recovered text before relying on a result.
 
 ## PDF extraction
@@ -31,7 +37,7 @@ PyMuPDF handles selectable text but reading order can be wrong in multi-column l
 
 ## Long and composite notices
 
-The semantic provider does not implement section-aware chunking and reconciliation. Very long notices may exceed a model limit or lose cross-section context. MyMemory must split text into sub-500-byte queries, so a long notice can exhaust its public quota or fail partway through. The text API applies a 200,000-character ceiling; visual inputs accept at most 12 pages, 15 MB per image page, and 50 MB total. Provider failures are surfaced.
+The semantic provider does not implement section-aware chunking and reconciliation. Very long notices may exceed a model limit or lose cross-section context. MyMemory must split text into sub-500-byte queries; the current splitter preserves paragraph/column boundaries and complete OCR lines when they fit but cannot reconstruct table meaning. A long notice can exhaust the public translator's quota or fail partway through. The source-line completeness audit is capped at 120 units. The text API applies a 200,000-character ceiling; visual inputs accept at most 12 pages, 15 MB per image page, and 50 MB total. Provider failures and unverified completeness are surfaced instead of silently bypassed.
 
 ## Visual and cultural interpretation
 
@@ -39,7 +45,7 @@ Lucide icons use common conventions, but meaning is not culturally universal. Ic
 
 ## Simplification loss
 
-Concise language can unintentionally weaken a qualification, remove context, or imply an order. Conditions B and C must therefore be audited against source evidence, not assumed equivalent.
+Concise language can unintentionally weaken a qualification, remove context, or imply an order. Conditions B and C render the same structured facts but must still be compared with the source, not assumed equivalent. Funding awarded to participants is stored separately from fees they must pay; OCR or semantic errors can still confuse the direction of payment.
 
 ## Evaluation bias
 
@@ -56,7 +62,7 @@ SQLite and source-image storage have no user-account authentication or encryptio
 - interactive crop and perspective correction;
 - stronger document detection, deskewing, and Korean OCR confidence scoring;
 - replacement of the temporary public translator with a controlled service;
-- robust chunking/reconciliation for very long notices;
+- robust semantic chunking/reconciliation for very long notices and dense tables;
 - URL ingestion;
 - PNG or server-generated PDF export;
 - non-English target languages;

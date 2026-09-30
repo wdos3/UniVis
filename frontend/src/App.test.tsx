@@ -15,7 +15,7 @@ vi.mock('./ocr/browserOcr', () => ({ isBrowserOcrSupported: vi.fn(), recognizeIm
 const notice: NoticeData = {
   title: 'Test notice', notice_type: 'Other', audience: [], purpose: '', summary: '',
   actions: [], deadlines: [], required_documents: [], eligibility: [], exceptions: [], warnings: [],
-  consequences: [], locations: [], contacts: [], fees: [], links: [], key_details: [], conditional_groups: [],
+  consequences: [], locations: [], contacts: [], fees: [], financial_support: [], links: [], key_details: [], conditional_groups: [],
   source_language: 'ko', target_language: 'en', ambiguities: [], unverified_items: [], source_facts: [],
   template_overrides: { checklist: null, step_flow: null, timeline: null, decision_tree: null, warning_cards: null, information_cards: null },
 }
@@ -173,5 +173,110 @@ describe('App browser OCR', () => {
     expect(await screen.findByText('Mock mode requires exact synthetic notice OCR.')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { level: 2, name: 'Test notice' })).not.toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '' })).toHaveValue('공지사항 다른 날짜')
+  })
+
+  it('retries in-place OCR corrections with their positions and keeps the local photo', async () => {
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: true, default_provider: 'openai', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: false })
+    const recoveredPage = { text: '지원 마감', spans: [{ text: '지원 마감', box: { x: 0.1, y: 0.2, width: 0.3, height: 0.1 } }] }
+    vi.mocked(recognizeImages).mockResolvedValue({ pages: [recoveredPage], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
+    vi.mocked(api.analyzeClientOcr).mockRejectedValueOnce(new Error('Coverage check could not resolve all details.')).mockResolvedValueOnce(imageResult)
+    const createUrl = vi.fn().mockReturnValueOnce('blob:draft').mockReturnValueOnce('blob:result')
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+
+    const { container } = render(<App />)
+    await screen.findByText('Photos are read on your device.')
+    const file = new File(['photo bytes'], 'notice.png', { type: 'image/png' })
+    fireEvent.change(container.querySelector('input[multiple]')!, { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+
+    expect(await screen.findByText('Coverage check could not resolve all details.')).toBeInTheDocument()
+    expect(screen.getByText('Review recognized text before retrying')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open page photo' })).toHaveAttribute('href', 'blob:draft')
+    expect(screen.getByPlaceholderText('공지사항의 한국어 텍스트를 여기에 붙여넣으세요…')).toBeDisabled()
+    expect(screen.getByText(/Photo correction is active above/)).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: /Page 1 recognized text/i }), { target: { value: '지원 마감 9월 30일' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Retry analysis with corrected text' }))
+
+    await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenLastCalledWith(
+      [{ text: '지원 마감 9월 30일', spans: [{ text: '지원 마감 9월 30일', box: recoveredPage.spans[0].box }] }], 1200, 'auto', 'uploaded_image',
+    ))
+    expect(recognizeImages).toHaveBeenCalledTimes(1)
+    expect(await screen.findByAltText('Original notice page 1')).toHaveAttribute('src', 'blob:result')
+    expect(createUrl).toHaveBeenCalledWith(file)
+    expect(screen.queryByText('Review recognized text before retrying')).not.toBeInTheDocument()
+    expect(screen.getByPlaceholderText('공지사항의 한국어 텍스트를 여기에 붙여넣으세요…')).toBeEnabled()
+  })
+
+  it.each([
+    '첫째 항목\n새 항목\n둘째 항목',
+    '둘째 항목\n첫째 항목',
+  ])('drops positions when a correction changes line structure: %s', async (corrected) => {
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: true, default_provider: 'openai', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: false })
+    vi.mocked(recognizeImages).mockResolvedValue({
+      pages: [{ text: '첫째 항목\n둘째 항목', spans: [
+        { text: '첫째 항목', box: { x: 0.1, y: 0.2, width: 0.2, height: 0.1 } },
+        { text: '둘째 항목', box: { x: 0.1, y: 0.4, width: 0.2, height: 0.1 } },
+      ] }],
+      latencyMs: 1200, initializationMs: 500, inferenceMs: 700,
+    })
+    vi.mocked(api.analyzeClientOcr).mockRejectedValueOnce(new Error('Review OCR lines.')).mockResolvedValueOnce(imageResult)
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn().mockReturnValue('blob:photo') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+
+    const { container } = render(<App />)
+    await screen.findByText('Photos are read on your device.')
+    fireEvent.change(container.querySelector('input[multiple]')!, { target: { files: [new File(['photo'], 'notice.png', { type: 'image/png' })] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+    expect(await screen.findByText('Review OCR lines.')).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('textbox', { name: /Page 1 recognized text/i }), { target: { value: corrected } })
+    fireEvent.click(screen.getByRole('button', { name: 'Retry analysis with corrected text' }))
+
+    await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenLastCalledWith(
+      [{ text: corrected, spans: [] }], 1200, 'auto', 'uploaded_image',
+    ))
+  })
+
+  it('ignores an in-flight response after the selected images change', async () => {
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: true, default_provider: 'openai', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: false })
+    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '첫 번째 공지', spans: [] }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
+    let resolveAnalysis!: (value: AnalysisResult) => void
+    vi.mocked(api.analyzeClientOcr).mockReturnValue(new Promise((resolve) => { resolveAnalysis = resolve }))
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn().mockReturnValueOnce('blob:first').mockReturnValueOnce('blob:second') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+
+    const { container } = render(<App />)
+    await screen.findByText('Photos are read on your device.')
+    const imageInput = container.querySelector('input[multiple]')!
+    fireEvent.change(imageInput, { target: { files: [new File(['A'], 'first.png', { type: 'image/png' })] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+    await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenCalledOnce())
+    fireEvent.change(imageInput, { target: { files: [new File(['B'], 'second.png', { type: 'image/png' })] } })
+    resolveAnalysis(imageResult)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Analyze 2 pages as one notice' })).toBeEnabled())
+    expect(screen.queryByRole('heading', { level: 2, name: 'Test notice' })).not.toBeInTheDocument()
+    expect(screen.queryByAltText('Original notice page 1')).not.toBeInTheDocument()
+    expect(screen.queryByText('Review recognized text before retrying')).not.toBeInTheDocument()
+    expect(screen.getByText('second.png')).toBeInTheDocument()
+  })
+
+  it('clears an analyzed result when its selected photo is removed', async () => {
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: true, default_provider: 'openai', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: false })
+    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '지원 마감', spans: [] }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700 })
+    vi.mocked(api.analyzeClientOcr).mockResolvedValue(imageResult)
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn().mockReturnValueOnce('blob:draft').mockReturnValueOnce('blob:result') })
+    const revokeUrl = vi.fn()
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeUrl })
+
+    const { container } = render(<App />)
+    await screen.findByText('Photos are read on your device.')
+    fireEvent.change(container.querySelector('input[multiple]')!, { target: { files: [new File(['photo'], 'notice.png', { type: 'image/png' })] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Test notice' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove page 1' }))
+    expect(screen.queryByRole('heading', { level: 2, name: 'Test notice' })).not.toBeInTheDocument()
+    expect(revokeUrl).toHaveBeenCalledWith('blob:result')
   })
 })

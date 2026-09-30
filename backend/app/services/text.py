@@ -66,9 +66,14 @@ def simplified_text(notice: NoticeData) -> str:
     if notice.locations:
         sections.append(("Where", [item.text for item in notice.locations]))
     if notice.key_details:
-        sections.append(("Other key details", [item.text for item in notice.key_details]))
+        details_by_topic: dict[str, list[str]] = {}
+        for item in notice.key_details:
+            details_by_topic.setdefault(item.label.strip() or "Other key details", []).append(item.text)
+        sections.extend(details_by_topic.items())
     if notice.fees:
         sections.append(("Fees", [item.text for item in notice.fees]))
+    if notice.financial_support:
+        sections.append(("Financial support", [item.text for item in notice.financial_support]))
     if notice.links:
         sections.append(("Online links", [item.text for item in notice.links]))
     if notice.contacts:

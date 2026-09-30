@@ -1,9 +1,31 @@
 /// <reference types="vite/client" />
 
 import type { OcrResult, OcrResultItem, PaddleOCR } from '@paddleocr/paddleocr-js'
+import type { QRCode } from 'jsqr'
 import type { BoundingBox, OcrSpan } from '../types'
 
 type OcrEngine = Awaited<ReturnType<typeof PaddleOCR.create>>
+type QrDecoder = typeof import('jsqr').default
+
+interface DecodedQrUrl {
+  url: string
+  box: BoundingBox
+}
+
+interface QrBounds {
+  left: number
+  right: number
+  top: number
+  bottom: number
+}
+
+// A dense QR code in a phone photo was unreadable at 2400px; tiled 3500px kept it legible.
+const QR_MAX_IMAGE_SIDE = 3500
+const QR_TILE_SIZE = 1000
+const QR_TILE_STEP = 800
+const QR_MAX_CODES_PER_TILE = 4
+// QR work runs alongside PaddleOCR and may add only this much time after OCR finishes.
+const QR_EXTRA_WAIT_MS = 1500
 
 export interface BrowserOcrResult {
   pages: BrowserOcrPage[]
@@ -89,6 +111,116 @@ function pageText(result: OcrResult): BrowserOcrPage {
   return { text: lines.join('\n'), spans }
 }
 
+function webUrl(rawValue: string): string | null {
+  const value = rawValue.trim()
+  if (!value || value.length > 2048 || [...value].some((character) => {
+    const code = character.charCodeAt(0)
+    return code < 32 || code === 127
+  })) return null
+  try {
+    const parsed = new URL(value)
+    if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) return null
+    return value
+  } catch {
+    return null
+  }
+}
+
+function tileStarts(length: number): number[] {
+  if (length <= QR_TILE_SIZE) return [0]
+  const starts: number[] = []
+  for (let start = 0; start < length - QR_TILE_SIZE; start += QR_TILE_STEP) starts.push(start)
+  starts.push(length - QR_TILE_SIZE)
+  return [...new Set(starts)]
+}
+
+function qrBounds(code: QRCode): QrBounds | null {
+  const corners = [code.location.topLeftCorner, code.location.topRightCorner,
+    code.location.bottomLeftCorner, code.location.bottomRightCorner]
+  if (!corners.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y))) return null
+  return {
+    left: Math.min(...corners.map(({ x }) => x)),
+    right: Math.max(...corners.map(({ x }) => x)),
+    top: Math.min(...corners.map(({ y }) => y)),
+    bottom: Math.max(...corners.map(({ y }) => y)),
+  }
+}
+
+function maskQr(image: ImageData, bounds: QrBounds): void {
+  const left = Math.max(0, Math.floor(bounds.left - 15))
+  const right = Math.min(image.width, Math.ceil(bounds.right + 15))
+  const top = Math.max(0, Math.floor(bounds.top - 15))
+  const bottom = Math.min(image.height, Math.ceil(bounds.bottom + 15))
+  for (let y = top; y < bottom; y++) {
+    for (let x = left; x < right; x++) {
+      const pixel = (y * image.width + x) * 4
+      image.data[pixel] = 255
+      image.data[pixel + 1] = 255
+      image.data[pixel + 2] = 255
+      image.data[pixel + 3] = 255
+    }
+  }
+}
+
+async function decodeQrUrls(file: File, decoderPromise: Promise<QrDecoder | null>): Promise<DecodedQrUrl[]> {
+  let bitmap: ImageBitmap | undefined
+  try {
+    const decode = await decoderPromise
+    if (!decode) return []
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+    const scale = Math.min(1, QR_MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height))
+    const width = Math.round(bitmap.width * scale)
+    const height = Math.round(bitmap.height * scale)
+    if (!width || !height) return []
+    const context = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })
+    if (!context) return []
+    context.drawImage(bitmap, 0, 0, width, height)
+
+    const urls = new Map<string, BoundingBox>()
+    for (const top of tileStarts(height)) {
+      for (const left of tileStarts(width)) {
+        const tile = context.getImageData(left, top,
+          Math.min(QR_TILE_SIZE, width - left), Math.min(QR_TILE_SIZE, height - top))
+        for (let count = 0; count < QR_MAX_CODES_PER_TILE; count++) {
+          const code = decode(tile.data, tile.width, tile.height, { inversionAttempts: 'dontInvert' })
+          if (!code) break
+          const url = webUrl(code.data)
+          const bounds = qrBounds(code)
+          if (!bounds) break
+          const x = Math.max(0, (left + bounds.left) / width)
+          const y = Math.max(0, (top + bounds.top) / height)
+          const right = Math.min(1, (left + bounds.right) / width)
+          const bottom = Math.min(1, (top + bounds.bottom) / height)
+          if (url && right > x && bottom > y && !urls.has(url)) {
+            urls.set(url, { x, y, width: right - x, height: bottom - y })
+          }
+          maskQr(tile, bounds)
+        }
+      }
+    }
+    return [...urls].map(([url, box]) => ({ url, box }))
+  } catch {
+    // QR decoding is best-effort. The image still gets its normal OCR result.
+    return []
+  } finally {
+    bitmap?.close()
+  }
+}
+
+async function qrUrlsWithoutDelayingOcr(promise: Promise<DecodedQrUrl[]>): Promise<DecodedQrUrl[]> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<DecodedQrUrl[]>((resolve) => {
+        timeout = setTimeout(() => resolve([]), QR_EXTRA_WAIT_MS)
+      }),
+    ])
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
 export async function recognizeImages(
   files: File[],
   onProgress?: (completed: number, total: number) => void,
@@ -102,6 +234,9 @@ export async function recognizeImages(
 
   const startedAt = performance.now()
   onProgress?.(0, files.length)
+  const qrDecoderPromise: Promise<QrDecoder | null> = import('jsqr')
+    .then(({ default: decoder }) => decoder)
+    .catch(() => null)
   const engine = await getEngine()
   const initializedAt = performance.now()
   const pages: BrowserOcrPage[] = []
@@ -109,6 +244,7 @@ export async function recognizeImages(
 
   for (const [index, file] of files.entries()) {
     let result: OcrResult[]
+    const qrUrlsPromise = decodeQrUrls(file, qrDecoderPromise)
     try {
       result = await engine.predict(file, {
         textDetLimitType: 'max',
@@ -121,6 +257,14 @@ export async function recognizeImages(
       throw new Error(`OCR returned ${result.length} pages for image ${index + 1}; expected one.`)
     }
     const page = pageText(result[0])
+    const qrUrls = await qrUrlsWithoutDelayingOcr(qrUrlsPromise)
+    if (qrUrls.length) {
+      for (const { url, box } of qrUrls) {
+        const qrText = `Decoded QR code URL (not opened): ${url}`
+        page.text = page.text ? `${page.text}\n${qrText}` : qrText
+        if (qrText.length <= 500) page.spans.push({ text: qrText, box })
+      }
+    }
     const spans = page.spans.slice(0, Math.min(250, remainingSpans))
     remainingSpans -= spans.length
     pages.push({ text: page.text, spans })

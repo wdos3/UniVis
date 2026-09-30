@@ -10,10 +10,12 @@ instruction choices are evaluated.
 - `api/index.py` exposes the existing FastAPI application as a Vercel Python
   function.
 - The hosted camera and image upload path runs PaddleOCR.js with Korean/English
-  PP-OCRv5 models in the visitor's browser. It posts only ordered recognized
+  PP-OCRv5 models in the visitor's browser. It posts per-page recognized
   text and normalized text-box positions to `/api/analyze-client-ocr`; photo
-  bytes and filenames are not sent to that endpoint. The server still sends recognized text to the configured
-  translator and semantic provider.
+  bytes and filenames are not sent to that endpoint. The browser also makes a
+  best-effort local scan for HTTP(S) QR URLs, adding decoded links to the
+  recognized text without opening them. The server still sends recognized text
+  to the configured translator and semantic provider.
 - `vercel.json` rewrites `/api/*`, `/uploads/*`, and `/demo-images/*` to that
   function and serves the React single-page app for other routes.
 - The HTML entrypoint is sent with `Cache-Control: no-store` so a browser does
@@ -54,13 +56,27 @@ handled by browser OCR on the hosted site; local Python/Docker OCR supports them
 ## Fidelity and latency limits
 
 OCR text order can interleave columns and separate table headers from their
-values. Browser OCR therefore sends bounded text-box positions, and the API
-reconstructs clearly aligned English-test score pairs without trusting the
-machine translation's reading order. These pairs are flagged for review.
+values. Browser OCR therefore sends bounded text-box positions. The API
+reorders a clearly positioned two-column band column-first without dropping
+lines and can add review-marked, horizontally aligned English-test score pairs.
+It leaves sparse or ambiguous layouts alone rather than guessing. MyMemory
+translation preserves paragraph and OCR-line boundaries where its byte limit
+permits, but its output can still scramble tables.
+
+The English digest is made from structured OpenAI extraction, not from a raw
+list of unmatched OCR lines. One or more follow-up calls repair user-facing fields
+left in Korean when needed. A separate call then audits recovered source lines
+against the English items that cite them and may append grounded English
+details; a targeted retry is possible if the first audit cannot classify some
+lines. If substantive OCR text still cannot be interpreted, the API rejects the
+digest. The hosted UI keeps the source photo and recognized text in memory so
+the user can correct OCR and retry without another OCR pass. Funding awarded to
+participants is presented separately from applicant fees.
+
 The fidelity percentage measures links among facts the semantic model already
-identified; the review panel separately lists OCR lines not mapped to output.
-It is not a guarantee that all source facts were extracted. On a dense
-recruitment poster, both `gpt-4o-mini` and a trial of `gpt-4.1-mini` omitted
-some prose; the latter also mispaired exam scores and exceeded the interactive
-latency target. Keep human review available for high-stakes eligibility and
-deadline information.
+identified; it is not a completeness or translation-accuracy guarantee. The
+source-line audit cannot recover text OCR missed, certify English meaning, or
+resolve every table. The new follow-up calls also increase tokens and latency.
+The 10–15 second end-to-end target is not yet met on a tested dense poster.
+Keep human review available for high-stakes eligibility and deadlines, and do
+not treat this branch as production-ready.

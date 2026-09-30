@@ -16,6 +16,44 @@ def test_translation_chunks_stay_within_mymemory_byte_limit() -> None:
     assert all(len(chunk.encode("utf-8")) <= 480 for chunk in chunks)
 
 
+def test_translation_chunks_do_not_mix_ocr_sections_or_pages() -> None:
+    source = (
+        "[Page 1]\n모집 대상\n2026학년도 2학기 학부 재학생\n"
+        "\n연구 주제\nAI Wearable Device 연구\n\n"
+        "[Page 2]\n지원 금액\n연구비 1인당 최대 20만원"
+    )
+
+    chunks = split_utf8_chunks(source, max_bytes=100)
+
+    assert len(chunks) == 3
+    assert chunks[0].startswith("[Page 1]\n")
+    assert chunks[1].startswith("연구 주제\n")
+    assert chunks[2].startswith("[Page 2]\n")
+    assert all(len(chunk.encode("utf-8")) <= 100 for chunk in chunks)
+    assert " ".join(" ".join(chunks).split()) == " ".join(source.split())
+
+
+def test_translation_chunks_prefer_line_and_sentence_boundaries() -> None:
+    source = "지원 기간\n2026년 9월 20일까지 신청할 수 있습니다. 연구 계획서를 제출해야 합니다."
+
+    chunks = split_utf8_chunks(source, max_bytes=80)
+
+    assert chunks[0] == "지원 기간"
+    assert chunks[1] == "2026년 9월 20일까지 신청할 수 있습니다."
+    assert chunks[2] == "연구 계획서를 제출해야 합니다."
+    assert all(len(chunk.encode("utf-8")) <= 80 for chunk in chunks)
+
+
+def test_translation_chunks_fall_back_to_unicode_code_points_for_long_ocr_token() -> None:
+    source = "연구주제" * 15
+
+    chunks = split_utf8_chunks(source, max_bytes=25)
+
+    assert len(chunks) > 1
+    assert "".join(chunks) == source
+    assert all(len(chunk.encode("utf-8")) <= 25 for chunk in chunks)
+
+
 def test_mymemory_provider_uses_no_key_and_reports_request_count() -> None:
     seen_queries: list[str] = []
 

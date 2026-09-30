@@ -4,9 +4,11 @@ import logging
 import os
 import re
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from importlib.util import find_spec
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -30,12 +32,13 @@ from app.models import (
 )
 from app.services.demos import DEMOS, get_demo, match_demo
 from app.services.fidelity import calculate_fidelity, select_templates
+from app.services.coverage_repair import CoverageProviderError, CoverageRepairError, repair_coverage
 from app.services.extraction.reconciliation import add_page_provenance, split_recovered_pages
 from app.services.extraction.language_scores import add_aligned_language_scores, mark_unverified_language_scores
 from app.services.image_demos import IMAGE_DEMOS
 from app.services.images.pdf_images import render_pdf_pages
 from app.services.images.preprocessing import ImageProcessingError, prepare_image, upload_root
-from app.services.ocr_layout import format_ocr_layout
+from app.services.ocr_layout import format_ocr_layout, reorder_ocr_page_columns
 from app.services.pdf import DocumentExtractionError, extract_pdf
 from app.services.pipeline import PipelineResult, analyze_image_pipeline, analyze_text_pipeline
 from app.services.public_access import limit_public_analysis, public_mode, require_admin
@@ -117,6 +120,7 @@ def make_result(
 async def analyze(request: AnalyzeRequest) -> AnalysisResult:
     logger.info("analysis_started provider=%s korean_detected=%s", request.provider, appears_korean(request.text))
     pipeline = await _run_text_pipeline(request)
+    pipeline = await _complete_english_coverage(pipeline)
     acquisition = _pipeline_acquisition(pipeline, "text")
     result = make_result(
         pipeline.source_text,
@@ -144,6 +148,36 @@ async def _run_text_pipeline(request: AnalyzeRequest, *, layout_context: str = "
     except Exception as exc:
         logger.exception("analysis_failed provider=%s", request.provider)
         raise HTTPException(status_code=502, detail="The configured Version 2 pipeline could not complete the analysis.") from exc
+
+
+async def _complete_english_coverage(pipeline: PipelineResult, *, layout_context: str = "") -> PipelineResult:
+    if not pipeline.semantic_provider.startswith("openai-semantic:") or pipeline.notice.target_language != "en":
+        return pipeline
+    started = perf_counter()
+    try:
+        repair = await repair_coverage(
+            pipeline.notice, pipeline.source_text, layout_context=layout_context,
+        )
+    except CoverageProviderError as exc:
+        logger.warning("coverage_provider_failed reason=%s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except CoverageRepairError as exc:
+        logger.warning("coverage_repair_failed reason=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=422,
+            detail=f"A complete English interpretation could not be verified: {exc} Retake the photo or correct the recovered text.",
+        ) from exc
+    elapsed_ms = round((perf_counter() - started) * 1000)
+    return replace(
+        pipeline,
+        notice=repair.notice,
+        semantic_requests=pipeline.semantic_requests + repair.requests,
+        semantic_input_tokens=pipeline.semantic_input_tokens + repair.input_tokens,
+        semantic_output_tokens=pipeline.semantic_output_tokens + repair.output_tokens,
+        semantic_total_tokens=pipeline.semantic_total_tokens + repair.total_tokens,
+        semantic_latency_ms=pipeline.semantic_latency_ms + elapsed_ms,
+        total_latency_ms=pipeline.total_latency_ms + elapsed_ms,
+    )
 
 
 def _pipeline_acquisition(
@@ -223,7 +257,8 @@ async def analyze_text(request: AnalyzeRequest) -> AnalysisResult:
 
 @app.post("/api/analyze-client-ocr", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])
 async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
-    page_texts = [page.text.strip() for page in request.pages]
+    ordered_pages = [reorder_ocr_page_columns(page) for page in request.pages]
+    page_texts = [page.text.strip() for page in ordered_pages]
     source_text = "\n\n".join(f"[Page {index}]\n{text}" for index, text in enumerate(page_texts, start=1))
     if len(re.findall(r"[가-힣]", source_text)) < 4:
         raise HTTPException(
@@ -231,9 +266,10 @@ async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
             detail="Browser OCR recovered too little Korean text. Retake the photo closer, brighter, and straight-on.",
         )
 
+    layout_context = format_ocr_layout(ordered_pages)
     pipeline = await _run_text_pipeline(
         AnalyzeRequest(text=source_text, target_language=request.target_language, provider=request.provider),
-        layout_context=format_ocr_layout(request.pages),
+        layout_context=layout_context,
     )
     if pipeline.semantic_provider == "mock-semantic":
         normalized_ocr = re.sub(r"\s+", "", "".join(page_texts))
@@ -261,7 +297,9 @@ async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
         for index, text in enumerate(page_texts, start=1)
     ]
     add_page_provenance(pipeline.notice, page_texts, pages)
-    add_aligned_language_scores(pipeline.notice, request.pages, pages)
+    add_aligned_language_scores(pipeline.notice, ordered_pages, pages)
+    pipeline = await _complete_english_coverage(pipeline, layout_context=layout_context)
+    add_page_provenance(pipeline.notice, page_texts, pages)
     blank_pages = [page.page_number for page in pages if not page.readable]
     warnings = [f"Browser OCR recovered no text from page(s): {', '.join(map(str, blank_pages))}."] if blank_pages else []
     acquisition = _pipeline_acquisition(
@@ -324,6 +362,8 @@ async def analyze_prepared_images(
     pages = [image.page for image in prepared_images]
     quality_warnings = sum(len(page.quality_issues) for page in pages)
     pages_needing_review = sum(not page.readable or bool(page.quality_issues) for page in pages)
+    add_page_provenance(pipeline.notice, pipeline.page_texts or [pipeline.source_text], pages)
+    pipeline = await _complete_english_coverage(pipeline)
     add_page_provenance(pipeline.notice, pipeline.page_texts or [pipeline.source_text], pages)
     critical_review = sum(fact.critical and fact.state.value == "needs_review" for fact in pipeline.notice.source_facts)
     acquisition = _pipeline_acquisition(
@@ -475,6 +515,8 @@ async def reprocess_recovered_text(notice_id: str, update: RecoveredTextUpdate) 
     add_page_provenance(pipeline.notice, recovered_pages, existing.source_pages)
     if existing.acquisition.ocr_provider == "browser-ocr-kor-eng":
         mark_unverified_language_scores(pipeline.notice, normalized_text)
+    pipeline = await _complete_english_coverage(pipeline)
+    add_page_provenance(pipeline.notice, recovered_pages, existing.source_pages)
     blank_pages = [index for index, text in enumerate(recovered_pages, start=1) if not text]
     warnings = [f"Recovered text remains empty on page(s): {', '.join(map(str, blank_pages))}."] if blank_pages else []
     acquisition = _pipeline_acquisition(

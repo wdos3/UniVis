@@ -4,9 +4,9 @@ Version 2 separates the notice pipeline into three replaceable portions:
 
 1. PaddleOCR with the Korean PP-OCRv5 model recovers Korean text—locally in Python/Docker, or in the visitor's browser on the hosted site;
 2. MyMemory provides temporary no-key translation (or a configured LibreTranslate instance can replace it);
-3. one OpenAI structured-output request converts the bilingual text into typed visual instructions, which React renders deterministically.
+3. OpenAI extracts typed notice facts from the Korean source and translation, then checks the English output for omitted source details. React renders the result deterministically.
 
-The response records the translation request count and the semantic call's input, output, and total token usage. Version 1 remains unchanged in `../visnotice` apart from its explicit Version 1 branding.
+An analysis can make several OpenAI calls: initial structured extraction, one or more English-field repair calls when needed, a source-line completeness audit, and possibly a targeted audit retry. The response records translation requests, semantic requests, and aggregate input/output/total token usage. Version 1 remains unchanged in `../visnotice` apart from its explicit Version 1 branding.
 
 **Visualizing Korean University Notices for International Students**
 
@@ -24,15 +24,18 @@ It is designed to test whether visualization helps international students identi
 - ordered multi-image previews, removal, and page reordering;
 - EXIF correction, conservative enhancement, quality screening, QR detection, and image-PDF rendering;
 - PaddleOCR PP-OCRv5 Korean recognition for photographs and image-only PDFs in the local Python/Docker runtime;
-- browser-based PaddleOCR for camera and image uploads on the hosted site, with only recognized text sent to the application API;
+- browser-based PaddleOCR for camera and image uploads on the hosted site, with recognized text, bounded text positions, and any locally decoded QR web URLs sent to the application API rather than photo bytes;
+- conservative column-aware ordering for browser OCR when positioned text clearly forms two side-by-side sections;
+- local best-effort QR URL decoding that never opens links automatically;
 - selectable MyMemory or LibreTranslate adapter plus mock translation for demos;
+- translation chunking that keeps OCR paragraph/column boundaries and whole lines where the provider's byte limit permits;
 - strict Pydantic intermediate representation—models never generate React or HTML;
-- exactly one OpenAI semantic request per live analysis;
-- recorded OCR, translation, semantic, and total latency plus semantic input/output/total token usage;
+- English-language field repair and a source-line completeness audit that can add grounded details or reject an uncertain result;
+- recorded OCR, translation, semantic, and total latency plus aggregate semantic request/token counts;
 - exact Korean evidence and source-fact IDs on important items;
 - deterministic visual-template selection;
 - five grounded text demos and seven generated image fixtures across six photo scenarios;
-- original-photo display, recovered Korean text correction, and image-backed evidence;
+- original-photo display, recovered Korean text correction and retry after a failed photo analysis, and image-backed evidence;
 - manual researcher correction and regeneration without another AI call;
 - research sessions with isolated A/B/C conditions, questions, elapsed time, confidence, and local SQLite storage;
 - CSV study-data export with comprehension accuracy and critical-information miss rate;
@@ -110,7 +113,7 @@ Copy `.env.example` to `.env`. `OPENAI_API_KEY` is required only for arbitrary s
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `OPENAI_API_KEY` | Enables the single live semantic call | unset |
+| `OPENAI_API_KEY` | Enables live semantic extraction and English completeness checks | unset |
 | `OPENAI_MODEL` | Structured-output semantic model | `gpt-4o-mini` |
 | `PADDLE_PDX_MODEL_SOURCE` | Paddle model host (`BOS` is the official object-store source) | `BOS` |
 | `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK` | Skip Paddle's extra model-host connectivity probe | `True` |
@@ -139,10 +142,10 @@ With no key, the app starts in mock mode and explains that arbitrary real notice
 1. Select **Take a Photo**, **Upload Image**, **Upload PDF**, or **Paste Korean text**.
 2. Preview image pages, add/remove pages, and put them in reading order.
 3. Select Auto, Mock, or OpenAI for the semantic step and analyze the notice.
-4. For image input, inspect original pages, quality warnings, QR results, and OCR-recovered Korean text.
+4. For image input, inspect original pages and OCR-recovered Korean text. Local Python/Docker image analysis also reports quality warnings and QR results; the hosted browser route attempts QR URL decoding locally.
 5. Inspect Translation, Simplified Text, and Visual Instructions.
 6. Turn on **Show source evidence** to compare English items with Korean phrases, fact IDs, and source pages.
-7. In local development, correct recovered text or use **Researcher View** for structured-data/template corrections. These controls are not offered on the public website.
+7. If hosted photo analysis cannot verify a complete English digest, compare its recovered text with the photo, correct the OCR, and retry without rerunning OCR. In local development, **Researcher View** also supports structured-data/template corrections; that administrative control is not offered on the public website.
 8. Use **Print / Save PDF** for a clean student-facing export.
 
 Image-only PDFs are rendered and processed by local Python/Docker OCR; the hosted
@@ -169,11 +172,15 @@ Photo(s) / screenshot / PDF / text
 Local image preparation + PaddleOCR PP-OCRv5 Korean (Python/Docker), or
 browser PaddleOCR for hosted camera/image input (or embedded PDF/text input)
     ↓
+Conservative column-aware ordering for positioned browser OCR
+    ↓
 Temporary translation provider (MyMemory or LibreTranslate)
     ↓
-One OpenAI semantic structured-output request
+OpenAI structured extraction + English-field repair when needed
     ↓
-Strict NoticeData schema + evidence/fidelity coverage
+Source-line completeness audit and possible targeted retry
+    ↓
+Strict NoticeData schema + evidence/fidelity checks, or an explicit failure
     ↓
 Deterministic React templates
     ↓
@@ -194,11 +201,13 @@ npm run build
 ```
 
 Backend tests cover image and multi-image upload, browser-OCR text ingestion,
-page provenance, image-only PDFs, EXIF rotation, preprocessing, invalid/oversized
-images, QR extraction, table preservation, conservative provider failure,
-recovered-text correction, schema validation, fidelity, and CSV export. Frontend
-tests cover camera capture markup, ordered previews, browser OCR integration,
-local-only evidence previews, template rendering, and evidence disclosure.
+conservative column ordering, page provenance, image-only PDFs, EXIF rotation,
+preprocessing, invalid/oversized images, QR extraction, table preservation,
+translation chunking, English-field and source-line checks, conservative provider
+failure, recovered-text correction, schema validation, fidelity, and CSV export.
+Frontend tests cover camera capture markup, ordered previews, browser OCR and QR
+integration, correction/retry, local-only evidence previews, template rendering,
+and evidence disclosure.
 
 ## Repository map
 
@@ -218,4 +227,4 @@ visnotice-v2/
 
 ## Safety and limitations
 
-Generated output can be wrong and must not replace an official university notice. OCR may misread photographs, free machine translation may mistranslate administrative language, and semantic analysis may omit qualifications. Quality detection is heuristic and icons can differ culturally. The hosted UI's camera/image path runs PaddleOCR in the browser and sends recognized text, not photo bytes, to the application API. The local Python/Docker image path still uploads and stores originals for evidence review. Neither path sends images to OpenAI. Extracted text is sent to the configured translation service, and Korean plus translated text is sent to OpenAI for one semantic request. The prototype has no retention scheduler. It stores processed notices and study responses in SQLite and does not collect account credentials, names, or participant email addresses. Do not submit private notices to the public deployment.
+Generated output can be wrong and must not replace an official university notice. OCR may misread photographs, free machine translation may mistranslate administrative language, and even a schema-valid semantic analysis may omit or misclassify facts. The completeness audit compares recovered source lines with the English digest and rejects results it cannot confidently account for, but it cannot detect text OCR never recovered or prove the English meaning is correct. Quality detection is heuristic and icons can differ culturally. The hosted camera/image path keeps photo bytes in the browser and sends recognized text, positions, and any decoded QR URLs to the application API. The local Python/Docker image path still uploads and stores originals for evidence review. Neither path sends images to OpenAI. Extracted text is sent to the configured translation service; Korean source text and its translation are sent to OpenAI for analysis, with follow-up checks when needed. These calls add cost and latency; the 10–15 second end-to-end target is not yet met. The prototype has no retention scheduler. It stores processed notices and study responses in SQLite and does not collect account credentials, names, or participant email addresses. Do not submit private notices to the public deployment.

@@ -182,6 +182,7 @@ class NoticeData(BaseModel):
     locations: list[LabeledFact] = Field(default_factory=list)
     contacts: list[Contact] = Field(default_factory=list)
     fees: list[LabeledFact] = Field(default_factory=list)
+    financial_support: list[LabeledFact] = Field(default_factory=list)
     links: list[LabeledFact] = Field(default_factory=list)
     key_details: list[LabeledFact] = Field(default_factory=list)
     conditional_groups: list[ConditionalGroup] = Field(default_factory=list)

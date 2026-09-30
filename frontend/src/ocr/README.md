@@ -28,9 +28,21 @@ for cold OCR and 2.5–2.8 s warm on this development machine. Those times do
 not include network transfer, translation, or the semantic model.
 
 For photo analysis, the browser sends recognized text and bounded normalized
-text-box coordinates to the API, never the image pixels or filename. The
-coordinates help reconstruct tables whose OCR reading order interleaves
-columns. The raw text remains complete if the coordinate hint limit is reached.
-Aligned English-test score pairs are rendered with a review warning because
-OCR and geometry can still be wrong; other unlinked OCR lines are listed for
-review rather than silently counted as covered facts.
+text-box coordinates to the API, never the image pixels or filename. The API
+uses these coordinates to reorder only a substantial, unambiguous
+two-column section column-first, preserving every OCR line and a blank boundary
+for translation chunking. It can also add aligned English-test score pairs with
+a review warning because OCR and geometry can still be wrong. Sparse tables
+and missing coordinate hints are not forcibly reordered; the raw text remains
+complete when the coordinate hint limit is reached. The semantic stage audits
+recovered source lines against the English display fields after structured
+extraction and any needed English-field repair. This can require additional
+OpenAI calls and still cannot certify semantic accuracy or recover text OCR
+missed. If material OCR text cannot be interpreted confidently, analysis stops
+and asks the user to correct recovered text and retry without rerunning OCR
+instead of presenting an incomplete summary.
+
+The browser also scans the image locally for HTTP(S) QR-code URLs with a
+bundled decoder. Decoding is best-effort and may miss a code when the photo is
+blurred, the code is small, or the scan exceeds its time budget. Decoded URLs
+are included in the text sent to the API; no URL is opened automatically.

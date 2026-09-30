@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { createEngine, predict } = vi.hoisted(() => ({
+const { createEngine, predict, decodeQr } = vi.hoisted(() => ({
   createEngine: vi.fn(),
   predict: vi.fn(),
+  decodeQr: vi.fn(),
 }))
 
 vi.mock('@paddleocr/paddleocr-js', () => ({
   PaddleOCR: { create: createEngine },
 }))
+vi.mock('jsqr', () => ({ default: decodeQr }))
 
 async function moduleUnderTest() {
   vi.resetModules()
@@ -15,7 +17,7 @@ async function moduleUnderTest() {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
   vi.stubGlobal('Worker', class {})
   vi.stubGlobal('ImageBitmap', class {})
   vi.stubGlobal('createImageBitmap', vi.fn())
@@ -76,6 +78,111 @@ describe('browser OCR', () => {
     expect(result.pages[0].spans[0].box.x).toBeCloseTo(0.1)
     expect(result.pages[0].spans[0].box.y).toBeCloseTo(0.1)
     expect(result.pages[0].spans[1].box.y).toBeCloseTo(0.15)
+  })
+
+  it('appends multiple locally decoded web URLs from one image without opening them', async () => {
+    const code = (data: string, x: number) => ({ data, location: {
+      topLeftCorner: { x, y: 50 }, topRightCorner: { x: x + 40, y: 50 },
+      bottomLeftCorner: { x, y: 90 }, bottomRightCorner: { x: x + 40, y: 90 },
+    } })
+    decodeQr.mockReturnValueOnce(code('https://m.site.naver.com/2eoT9', 50))
+      .mockReturnValueOnce(code('https://splus.sogang.ac.kr/ko/module/eco/program/view/443', 150))
+      .mockReturnValueOnce(code('javascript:alert(1)', 250))
+      .mockReturnValue(null)
+    const close = vi.fn()
+    const createBitmap = vi.fn().mockResolvedValue({ width: 300, height: 400, close })
+    const drawImage = vi.fn()
+    const getImageData = vi.fn((_x: number, _y: number, width: number, height: number) => ({
+      width, height, data: new Uint8ClampedArray(width * height * 4),
+    }))
+    class LocalCanvas {
+      getContext() { return { drawImage, getImageData } }
+    }
+    vi.stubGlobal('OffscreenCanvas', LocalCanvas)
+    vi.stubGlobal('createImageBitmap', createBitmap)
+    predict.mockResolvedValue([{ image: { width: 300, height: 400 }, items: [{
+      text: '지원 방법', score: 1, poly: [[0, 0], [120, 0], [120, 40], [0, 40]],
+    }] }])
+    const { recognizeImages } = await moduleUnderTest()
+    const file = new File(['image'], 'notice.png')
+
+    const result = await recognizeImages([file])
+
+    expect(result.pages[0].text).toBe('지원 방법\n'
+      + 'Decoded QR code URL (not opened): https://m.site.naver.com/2eoT9\n'
+      + 'Decoded QR code URL (not opened): https://splus.sogang.ac.kr/ko/module/eco/program/view/443')
+    expect(result.pages[0].spans.map((span) => span.text)).toEqual([
+      '지원 방법',
+      'Decoded QR code URL (not opened): https://m.site.naver.com/2eoT9',
+      'Decoded QR code URL (not opened): https://splus.sogang.ac.kr/ko/module/eco/program/view/443',
+    ])
+    expect(result.pages[0].spans[1].box.x).toBeCloseTo(50 / 300)
+    expect(result.pages[0].spans[1].box.y).toBeCloseTo(50 / 400)
+    expect(result.pages[0].spans[2].box.x).toBeCloseTo(150 / 300)
+    expect(result.pages[0].text.split('\n')).toHaveLength(result.pages[0].spans.length)
+    expect(createBitmap).toHaveBeenCalledWith(file, { imageOrientation: 'from-image' })
+    expect(drawImage).toHaveBeenCalledTimes(1)
+    expect(decodeQr).toHaveBeenCalledTimes(4)
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps text OCR usable when QR decoding fails', async () => {
+    decodeQr.mockImplementation(() => { throw new Error('decoder failed') })
+    const close = vi.fn()
+    const createBitmap = vi.fn().mockResolvedValue({ width: 300, height: 400, close })
+    class LocalCanvas {
+      getContext() { return { drawImage: vi.fn(), getImageData: () => ({
+        width: 300, height: 400, data: new Uint8ClampedArray(300 * 400 * 4),
+      }) } }
+    }
+    vi.stubGlobal('OffscreenCanvas', LocalCanvas)
+    vi.stubGlobal('createImageBitmap', createBitmap)
+    predict.mockResolvedValue([{ items: [{ text: '모집 기간', score: 1 }] }])
+    const { recognizeImages } = await moduleUnderTest()
+
+    const result = await recognizeImages([new File(['x'], 'notice.png')])
+
+    expect(result.pages[0].text).toBe('모집 기간')
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects unsafe or malformed decoded destinations', async () => {
+    const code = (data: string) => ({ data, location: {
+      topLeftCorner: { x: 50, y: 50 }, topRightCorner: { x: 90, y: 50 },
+      bottomLeftCorner: { x: 50, y: 90 }, bottomRightCorner: { x: 90, y: 90 },
+    } })
+    decodeQr.mockReturnValueOnce(code('https://user:secret@example.com/private'))
+      .mockReturnValueOnce(code('https://example.com/line\nbreak'))
+      .mockReturnValueOnce(code('file:///C:/private'))
+      .mockReturnValue(null)
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 300, height: 400, close: vi.fn() }))
+    class LocalCanvas {
+      getContext() { return { drawImage: vi.fn(), getImageData: () => ({
+        width: 300, height: 400, data: new Uint8ClampedArray(300 * 400 * 4),
+      }) } }
+    }
+    vi.stubGlobal('OffscreenCanvas', LocalCanvas)
+    predict.mockResolvedValue([{ items: [{ text: '연구 주제', score: 1 }] }])
+    const { recognizeImages } = await moduleUnderTest()
+
+    const result = await recognizeImages([new File(['x'], 'notice.png')])
+
+    expect(result.pages[0].text).toBe('연구 주제')
+  })
+
+  it('limits any additional wait for a slow QR decoder', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn().mockReturnValue(new Promise(() => {})))
+    predict.mockResolvedValue([{ items: [{ text: '신청 기간', score: 1 }] }])
+    const { recognizeImages } = await moduleUnderTest()
+    vi.useFakeTimers()
+    try {
+      const resultPromise = recognizeImages([new File(['x'], 'notice.png')])
+      await vi.advanceTimersByTimeAsync(2000)
+      const result = await resultPromise
+      expect(result.pages[0].text).toBe('신청 기간')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('rejects blank OCR results', async () => {

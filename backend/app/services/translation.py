@@ -24,37 +24,59 @@ class TranslationResult:
 
 
 def split_utf8_chunks(text: str, max_bytes: int = 480) -> list[str]:
-    """Split text without breaking Unicode code points or exceeding an API byte limit."""
+    """Keep OCR paragraphs and lines intact where the translation limit permits."""
     if max_bytes < 4:
         raise ValueError("max_bytes must be at least 4")
     if not text:
         return []
 
     chunks: list[str] = []
-    current = ""
-    for token in re.findall(r"\S+\s*|\s+", text):
-        candidate = current + token
-        if len(candidate.encode("utf-8")) <= max_bytes:
-            current = candidate
+    normalized = re.sub(r"\r\n?", "\n", text)
+    for paragraph in re.split(r"\n[ \t]*\n+", normalized):
+        if not paragraph.strip():
             continue
-        if current:
-            chunks.append(current.rstrip())
-            current = ""
-        while len(token.encode("utf-8")) > max_bytes:
-            split_at = 0
-            byte_count = 0
-            for index, character in enumerate(token):
-                next_count = byte_count + len(character.encode("utf-8"))
-                if next_count > max_bytes:
-                    break
-                split_at = index + 1
-                byte_count = next_count
-            chunks.append(token[:split_at].rstrip())
-            token = token[split_at:]
-        current = token
-    if current:
-        chunks.append(current.rstrip())
-    return [chunk for chunk in chunks if chunk]
+        current_lines: list[str] = []
+        for line in paragraph.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            candidate = "\n".join([*current_lines, line])
+            if len(candidate.encode("utf-8")) <= max_bytes:
+                current_lines.append(line)
+                continue
+            if current_lines:
+                chunks.append("\n".join(current_lines))
+                current_lines = []
+            if len(line.encode("utf-8")) <= max_bytes:
+                current_lines.append(line)
+            else:
+                chunks.extend(_split_oversize_line(line, max_bytes))
+        if current_lines:
+            chunks.append("\n".join(current_lines))
+    return chunks
+
+
+def _split_oversize_line(line: str, max_bytes: int) -> list[str]:
+    """Prefer sentence or word boundaries before falling back to code points."""
+    pieces: list[str] = []
+    remaining = line
+    while len(remaining.encode("utf-8")) > max_bytes:
+        byte_count = 0
+        prefix_end = 0
+        for index, character in enumerate(remaining):
+            byte_count += len(character.encode("utf-8"))
+            if byte_count > max_bytes:
+                break
+            prefix_end = index + 1
+        prefix = remaining[:prefix_end]
+        sentence_ends = list(re.finditer(r"(?<=[.!?。！？])[ \t]+", prefix))
+        word_ends = list(re.finditer(r"[ \t]+", prefix))
+        split_at = (sentence_ends or word_ends)[-1].end() if sentence_ends or word_ends else prefix_end
+        pieces.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].lstrip()
+    if remaining:
+        pieces.append(remaining)
+    return [piece for piece in pieces if piece]
 
 
 class TranslationProvider(ABC):

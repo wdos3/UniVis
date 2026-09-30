@@ -10,7 +10,7 @@ const result: AnalysisResult = {
   notice: {
     title: 'Test Notice', notice_type: 'Visa / immigration', audience: [], purpose: '', summary: 'Prepare one document.',
     actions: [{ ...grounded, step: 1, action: 'Prepare your passport.', details: '', deadline: null, location: null, required_items: [] }],
-    deadlines: [], required_documents: [{ ...grounded, name: 'Passport', required: true, condition: '' }], eligibility: [], exceptions: [], warnings: [], consequences: [], locations: [], contacts: [], fees: [], links: [], key_details: [], conditional_groups: [], source_language: 'ko', target_language: 'en', ambiguities: [], unverified_items: [], source_facts: [{ id: 'F001', kind: 'document', source_text: '여권', critical: true, state: 'verified', source_page: null, source_image_id: null, bounding_box: null }], template_overrides: { checklist: null, step_flow: null, timeline: null, decision_tree: null, warning_cards: null, information_cards: null },
+    deadlines: [], required_documents: [{ ...grounded, name: 'Passport', required: true, condition: '' }], eligibility: [], exceptions: [], warnings: [], consequences: [], locations: [], contacts: [], fees: [], financial_support: [], links: [], key_details: [], conditional_groups: [], source_language: 'ko', target_language: 'en', ambiguities: [], unverified_items: [], source_facts: [{ id: 'F001', kind: 'document', source_text: '여권', critical: true, state: 'verified', source_page: null, source_image_id: null, bounding_box: null }], template_overrides: { checklist: null, step_flow: null, timeline: null, decision_tree: null, warning_cards: null, information_cards: null },
   },
 }
 
@@ -36,10 +36,13 @@ describe('VisualInstructions', () => {
         ...result.notice,
         actions: [{ ...result.notice.actions[0], required_items: ['TOEIC score'] }],
         key_details: [{ ...grounded, text: 'Three-month probation period', label: 'Employment' }],
+        financial_support: [{ ...grounded, text: 'Activity stipend: KRW 200,000 per student', label: 'Scholarship' }],
       },
     }
     render(<VisualInstructions result={detailed} />)
     expect(screen.getByText('Bring: TOEIC score')).toBeInTheDocument()
     expect(screen.getByText('Three-month probation period')).toBeInTheDocument()
+    expect(screen.getByText('Employment')).toBeInTheDocument()
+    expect(screen.getByText('Activity stipend: KRW 200,000 per student')).toBeInTheDocument()
   })
 })
