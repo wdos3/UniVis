@@ -449,6 +449,33 @@ def test_unsupported_summary_and_review_claims_are_removed_without_dropping_supp
     assert context["unverified_items"] == []
 
 
+def test_audit_can_reject_an_unsupported_optional_document_qualifier_and_recover_required_submission() -> None:
+    from app.models import DocumentRequirement
+
+    source = "지원서를 제출"
+    notice = NoticeData(required_documents=[DocumentRequirement(
+        name="Application form", required=False, source_evidence=source,
+    )])
+    initial = RepairResponse(
+        represented_unit_ids=["P001-L0001"], details=[], decorative=[], unresolved_unit_ids=[],
+        unsupported_english_ids=["E001"],
+    )
+    required = "Submit the application form."
+    retry = RepairResponse(
+        represented_unit_ids=[], details=[_detail("P001-L0001", required, "application")],
+        decorative=[], unresolved_unit_ids=[],
+    )
+
+    result, calls = _run_repair(source, [initial, retry], notice=notice)
+
+    payload = json.loads(calls[0]["input"][1]["content"])
+    assert payload["english_fields"] == {"E001": "Application form | optional"}
+    assert result.notice.required_documents == []
+    assert required in simplified_text(result.notice)
+    assert "optional" not in simplified_text(result.notice)
+    assert not audit_coverage(result.notice, source).uncovered
+
+
 @pytest.mark.parametrize("faithful_retry", [True, False])
 def test_rejected_sanction_cannot_return_as_initial_or_retry_detail(faithful_retry: bool) -> None:
     source = "비교과통합관리시스템(S Plus)로 제출"

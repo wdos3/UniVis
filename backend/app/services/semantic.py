@@ -221,6 +221,19 @@ _CLOCK_TIME = re.compile(
 _KOREAN_HOUR = re.compile(r"(?<!\d)(?:(오전|오후)\s*)?(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분)?")
 _ENGLISH_HOUR = re.compile(r"(?<!\d)(\d{1,2})\s*(AM|PM)\b", re.IGNORECASE)
 _PHONE_REVIEW_NOTE = "Phone number does not match the cited source text; verify it against the notice."
+_REQUIRED_DOCUMENT_SOURCE = re.compile(r"필수(?:제출|서류)|제출(?:[.!。]|$|해야|필수|하세요|바랍니다)")
+_OPTIONAL_DOCUMENT_SOURCE = re.compile(
+    r"선택|희망|해당|경우|[가-힣]만(?=[가-힣,.]|$)|(?:으?면|때)|(?:필요|요청)시|"
+    r"제출(?:가능|할수|여부|하지|안해|안함|면제|생략|불필요)|"
+    r"필수(?:제출)?(?:는|가|이)?(?:아니|아님)|(?:있|없)(?:으면|을때)"
+)
+_UNCONDITIONAL_DOCUMENT_CONDITION = re.compile(
+    r"required(?: for (?:application(?: submission)?|submission))?\.?", re.IGNORECASE,
+)
+_CONDITIONAL_DOCUMENT_ENGLISH = re.compile(
+    r"\b(?:not required|not mandatory|optional|if|when|unless|applicable|conditional|may|can|as needed|upon request)\b",
+    re.IGNORECASE,
+)
 
 
 def _clock_minutes(hour: int, minute: int, meridiem: str | None) -> int | None:
@@ -367,6 +380,33 @@ async def repair_english_fields(
     return SemanticRepairMetrics(requests, input_tokens, output_tokens, total_tokens)
 
 
+def _reconcile_required_documents(notice: NoticeData) -> None:
+    """Resolve a required/optional contradiction only with a shared submit clause."""
+    for document in notice.required_documents:
+        evidence = re.sub(r"\s+", "", document.source_evidence)
+        if (
+            document.required
+            or not _REQUIRED_DOCUMENT_SOURCE.search(evidence)
+            or _OPTIONAL_DOCUMENT_SOURCE.search(evidence)
+            or (document.condition.strip() and not _UNCONDITIONAL_DOCUMENT_CONDITION.fullmatch(
+                re.sub(r"\s+", " ", document.condition).strip()
+            ))
+            or _CONDITIONAL_DOCUMENT_ENGLISH.search(
+                " ".join((document.name, document.condition, document.source_evidence))
+            )
+        ):
+            continue
+        name = re.sub(r"\s+", " ", document.name).strip().casefold()
+        for action in notice.actions:
+            if evidence != re.sub(r"\s+", "", action.source_evidence):
+                continue
+            required_names = {re.sub(r"\s+", " ", item).strip().casefold() for item in action.required_items}
+            if name in required_names:
+                document.required = True
+                document.state = ReviewState.NEEDS_REVIEW
+                break
+
+
 def normalize_notice(notice: NoticeData, *, source_text: str = "") -> NoticeData:
     """Apply conservative, deterministic cleanup that does not invent source content."""
     if source_text:
@@ -509,6 +549,7 @@ def normalize_notice(notice: NoticeData, *, source_text: str = "") -> NoticeData
         if any(_contains_korean_script(value) for value in (document.name, document.condition)):
             document.state = ReviewState.NEEDS_REVIEW
             untranslated = True
+    _reconcile_required_documents(notice)
     for deadline in notice.deadlines:
         if any(_contains_korean_script(value) for value in (deadline.date, deadline.time, deadline.description)):
             deadline.state = ReviewState.NEEDS_REVIEW

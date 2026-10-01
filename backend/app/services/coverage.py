@@ -5,7 +5,7 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 
-from app.models import GroundedItem, NoticeData
+from app.models import DocumentRequirement, GroundedItem, NoticeData
 
 
 PAGE_MARKER = re.compile(r"^\[Page (\d+)\]$")
@@ -104,7 +104,13 @@ def display_text(item: GroundedItem) -> str:
         if isinstance(value, str) and value.strip():
             values.append(value.strip())
         elif isinstance(value, list):
-            values.extend(part.strip() for part in value if isinstance(part, str) and part.strip())
+            items = [part.strip() for part in value if isinstance(part, str) and part.strip()]
+            if field == "required_items" and items:
+                values.append("Required items: " + ", ".join(items))
+            else:
+                values.extend(items)
+    if isinstance(item, DocumentRequirement) and not item.required:
+        values.append("optional")
     return " | ".join(values)
 
 

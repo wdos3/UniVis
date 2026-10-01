@@ -9,6 +9,21 @@ from app.services.semantic import OpenAISemanticProvider, normalize_notice
 from app.services.text import simplified_text
 
 
+def test_recognized_course_eligibility_keeps_the_research_supervision_qualification() -> None:
+    source = "모집 대상: 융합교육원에서 인정하는 연구 관련 과목을 수강하며 연구지도를 받는 학부생"
+    incomplete = "Undergraduate students taking research-related courses recognized by the Convergence Education Center."
+    expected = (
+        "Undergraduate students taking research-related courses recognized by the Convergence Education Center "
+        "and receiving research supervision."
+    )
+
+    assert correct_grounded_wording(incomplete, source) == expected
+    assert correct_grounded_wording(expected, source) == expected
+    assert correct_grounded_wording("Eligibility", source) == "Eligibility"
+    assert correct_grounded_wording(incomplete, source.replace("연구지도를 받는", "연구지도를 신청하는")) == incomplete
+    assert correct_grounded_wording(incomplete, source + " 중 학점 제한 있음") == incomplete
+
+
 def test_leave_participation_retains_both_distinct_funding_exclusions() -> None:
     source = "휴학생도 참여는 가능하나 연구비 및 활동비 지원 대상에서는 제외"
     broad = "Leave students can participate but are excluded from funding support."

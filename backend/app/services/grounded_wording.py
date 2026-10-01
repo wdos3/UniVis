@@ -27,6 +27,9 @@ _ENROLLED_UNDERGRADUATES_SOURCE = re.compile(
 )
 _RESEARCH_SPENDING_SOURCE = "연구비는기자재구입및대여,재료비,도서구입및인쇄비로사용가능"
 _LEAVE_FUNDING_EXCLUSION_SOURCE = "휴학생도참여는가능하나연구비및활동비지원대상에서는제외"
+_RESEARCH_COURSE_AUDIENCE_SOURCE = re.compile(
+    r"(?:모집대상[:：]?)?융합교육원에서인정하는연구관련과목을수강하며연구지도를받는학부생[.!。]?"
+)
 
 
 def _match_case(original: str, replacement: str) -> str:
@@ -38,6 +41,11 @@ def correct_grounded_wording(text: str, source_evidence: str) -> str:
     if not text or not source_evidence:
         return text
     evidence = re.sub(r"\s+", "", source_evidence)
+    if _RESEARCH_COURSE_AUDIENCE_SOURCE.fullmatch(evidence) and len(re.findall(r"[A-Za-z]+", text)) >= 6:
+        return (
+            "Undergraduate students taking research-related courses recognized by the Convergence Education Center "
+            "and receiving research supervision."
+        )
     if evidence == _LEAVE_FUNDING_EXCLUSION_SOURCE and len(re.findall(r"[A-Za-z]+", text)) >= 4:
         return "Students on leave may participate, but are excluded from both research funding and activity allowance support."
     enrollment = _ENROLLED_UNDERGRADUATES_SOURCE.fullmatch(evidence)

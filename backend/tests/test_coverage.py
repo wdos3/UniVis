@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.models import LabeledFact, NoticeData, SourceFact
-from app.services.coverage import audit_coverage
+from app.models import Action, DocumentRequirement, LabeledFact, NoticeData, SourceFact
+from app.services.coverage import audit_coverage, display_text
 
 
 def test_coverage_uses_grounded_output_not_model_claimed_source_facts() -> None:
@@ -25,6 +25,28 @@ def test_coverage_uses_grounded_output_not_model_claimed_source_facts() -> None:
     assert [(unit.id, unit.page, unit.text) for unit in audit.uncovered] == [
         ("P001-L0002", 1, "연구비: 1인당 최대 20만원")
     ]
+
+
+def test_audit_can_see_rendered_optional_document_and_mandatory_action_items() -> None:
+    source = "지원서를 제출"
+    notice = NoticeData(
+        actions=[Action(
+            step=1, action="Submit the application.", required_items=["Application form"], source_evidence=source,
+        )],
+        required_documents=[DocumentRequirement(
+            name="Application form", condition="Required for application submission", required=False,
+            source_evidence=source,
+        )],
+    )
+
+    audit = audit_coverage(notice, source)
+
+    assert audit.cited_english_by_unit["P001-L0001"] == [
+        "Submit the application. | Required items: Application form",
+        "Application form | Required for application submission | optional",
+    ]
+    notice.required_documents[0].required = True
+    assert display_text(notice.required_documents[0]) == "Application form | Required for application submission"
 
 
 def test_partial_quote_does_not_cover_the_rest_of_an_ocr_line() -> None:

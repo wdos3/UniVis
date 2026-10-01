@@ -42,6 +42,7 @@ _SPENDING_RULES = (
     (r"방문", r"\bvisit\w*\b|\bin[ -]person\b|\bgo(?:ing)? to\b", "in-person visit"),
 )
 _SOURCE_CONDITIONS = (
+    (r"연구지도\s*를\s*받는", r"\bresearch (?:supervision|guidance)\b|\bsupervised research\b", "receiving research supervision"),
     (r"휴학생[^\n]*연구비\s*및\s*활동비[^\n]*제외", r"\bresearch\b", "research funding exclusion"),
     (r"휴학생[^\n]*연구비\s*및\s*활동비[^\n]*제외", r"\bactivity\b", "activity allowance exclusion"),
     (r"학부\s*재학생", r"\benrolled\b|\bcurrently attending\b|\bregistered undergraduate", "enrolled undergraduates"),

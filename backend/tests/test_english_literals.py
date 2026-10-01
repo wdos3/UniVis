@@ -10,6 +10,15 @@ from app.services.coverage_repair import CoverageProviderError, RepairDetail, Re
 from app.services.english_literals import missing_english_literals, missing_source_conditions, missing_source_values
 
 
+@pytest.mark.parametrize("wording", ["receiving research supervision", "receiving research guidance"])
+def test_source_supervision_condition_cannot_be_reduced_to_course_enrollment(wording: str) -> None:
+    source = "연구 관련 과목을 수강하며 연구지도를 받는 학부생"
+    assert missing_source_conditions(source, "Undergraduate students taking research courses.") == [
+        "receiving research supervision"
+    ]
+    assert missing_source_conditions(source, f"Undergraduate students taking research courses and {wording}.") == []
+
+
 @pytest.mark.parametrize(("source", "english", "expected"), [
     ("연구비: 1인당 최대 20만원", "Research funding of up to KRW 200,000 per person.", []),
     ("연구비: 1인당 최대 20만원", "Research funding for AI projects.", ["KRW 200,000"]),
