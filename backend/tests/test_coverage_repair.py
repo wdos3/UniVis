@@ -165,7 +165,7 @@ def test_corrected_sogang_fixture_keeps_all_grounded_requirements_in_english_dig
         ("Check the official notice for the detailed topics.", "research_topic"),
         ("Research option 2: a topic chosen independently by students.", "research_topic"),
         ("Research funding: up to KRW 200,000 per person.", "funding"),
-        ("Research funds cover equipment purchase and rental, materials, book purchases, and printing.", "funding"),
+        ("Research expenses may cover equipment purchase or rental, material costs, book purchases, and printing costs.", "funding"),
         ("Research expenses must be paid by card at the Convergence Education Center, requiring an in-person visit.", "funding"),
         ("Activity allowance: KRW 200,000 per person.", "funding"),
         ("Expenses outside the research funding categories are paid as a scholarship.", "funding"),
@@ -631,7 +631,7 @@ def test_final_visible_output_cannot_add_contact_missing_from_source(field: str)
 
 
 def test_certain_spending_detail_omitting_printing_gets_targeted_retry() -> None:
-    source = "연구비는 기자재 구입 및 대여, 재료비, 도서 구입 및 인쇄비로 사용 가능"
+    source = "연구비는 기자재 구입, 대여, 재료비, 도서 구입 및 인쇄비에 사용 가능"
     initial = RepairResponse(
         represented_unit_ids=[], decorative=[], unresolved_unit_ids=[],
         details=[_detail("P001-L0001", "Research funding covers equipment purchase and rental, materials, and books.", "funding")],
@@ -647,6 +647,29 @@ def test_certain_spending_detail_omitting_printing_gets_targeted_retry() -> None
     assert "printing" in result.notice.financial_support[0].text
     retry_unit = json.loads(calls[1]["input"][1]["content"])["source_units"][0]
     assert retry_unit["previous_audit_issues"] == ["A repair detail omitted source spending rules: printing"]
+
+
+@pytest.mark.parametrize("incomplete", [
+    "Research funding covers equipment purchase and rental, materials, and printing costs.",
+    "Research funding covers equipment purchase and rental, materials, and books.",
+])
+def test_recognized_spending_clause_restores_all_categories_without_a_paid_retry(incomplete: str) -> None:
+    source = "연구비는 기자재 구입 및 대여, 재료비, 도서 구입 및 인쇄비로 사용 가능"
+    response = RepairResponse(
+        represented_unit_ids=[], decorative=[], unresolved_unit_ids=[],
+        details=[_detail("P001-L0001", incomplete, "funding")],
+    )
+
+    result, calls = _run_repair(source, response)
+
+    assert result.requests == len(calls) == 1
+    detail = result.notice.financial_support[0]
+    assert detail.source_evidence == source
+    assert detail.source_page == 1
+    assert detail.text == (
+        "Research expenses may cover equipment purchase or rental, material costs, book purchases, and printing costs."
+    )
+    assert audit_coverage(result.notice, source).uncovered == []
 
 
 def test_card_payment_location_alone_does_not_replace_in_person_procedure() -> None:

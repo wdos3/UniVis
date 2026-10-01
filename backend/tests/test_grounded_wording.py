@@ -92,6 +92,9 @@ def test_spending_verbs_keep_their_source_scope_and_card_payment_covers_all_expe
 
     assert correct_grounded_wording(english, source) == expected
     assert correct_grounded_wording(expected, source) == expected
+    assert correct_grounded_wording(
+        "Research expenses can cover equipment, materials, and printing costs.", source,
+    ) == expected
     assert correct_grounded_wording("Spending", source) == "Spending"
     assert correct_grounded_wording(english, source.replace("대여, ", "")) == english
     assert correct_grounded_wording(english, source + ", 식비 제외") == english
