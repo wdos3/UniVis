@@ -22,6 +22,7 @@ from app.services.coverage_repair import (
 )
 from app.services.text import simplified_text
 from app.services.grounded_wording import correct_grounded_wording
+from app.services.fidelity import calculate_fidelity
 
 
 class FakeResponses:
@@ -50,6 +51,43 @@ def _run_repair(source: str, response: RepairResponse | list[RepairResponse], *,
 
 def _detail(unit_id: str, text: str, category: str = "other", *, certain: bool = True) -> RepairDetail:
     return RepairDetail(unit_ids=[unit_id], text=text, category=category, certain=certain)
+
+
+def test_recovered_exact_source_fact_keeps_its_original_fidelity_reference() -> None:
+    source = "연구비: 1인당 최대 20만원"
+    notice = NoticeData(source_facts=[SourceFact(
+        id="F008", kind="financial_support", source_text=source, source_page=1,
+    )])
+    parsed = RepairResponse(
+        represented_unit_ids=[], details=[_detail(
+            "P001-L0001", "Research funding is up to KRW 200,000 per person.", "funding",
+        )], decorative=[], unresolved_unit_ids=[],
+    )
+
+    result, _ = _run_repair(source, parsed, notice=notice)
+
+    assert result.notice.financial_support[0].source_fact_ids == ["F008", "F009"]
+    fidelity = calculate_fidelity(result.notice, source)
+    assert fidelity.potentially_missing == []
+    assert fidelity.critical_fields_represented == 2
+    assert fidelity.serious_issue is False
+
+
+def test_source_fact_reference_recovery_requires_the_same_whole_clause_and_page() -> None:
+    source = "[Page 1]\n연구비: 1인당 최대 20만원"
+    notice = NoticeData(source_facts=[
+        SourceFact(id="F001", kind="financial_support", source_text="연구비: 1인당 최대 20만원", source_page=2),
+        SourceFact(id="F002", kind="financial_support", source_text="연구비:", source_page=1),
+    ])
+    parsed = RepairResponse(
+        represented_unit_ids=[], details=[_detail(
+            "P001-L0001", "Research funding is up to KRW 200,000 per person.", "funding",
+        )], decorative=[], unresolved_unit_ids=[],
+    )
+
+    result, _ = _run_repair(source, parsed, notice=notice)
+
+    assert result.notice.financial_support[0].source_fact_ids == ["F003"]
 
 
 def test_repair_schema_is_valid_for_openai_structured_outputs() -> None:

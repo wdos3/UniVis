@@ -306,6 +306,15 @@ def _append_details(notice: NoticeData, validated: list[tuple[RepairDetail, list
         next_id += 1
         evidence = "\n".join(unit.text for unit in units)
         page = units[0].page
+        evidence_key = re.sub(r"\s+", "", evidence)
+        # The audit can replace an unsupported primary rendering of a real
+        # source fact. Keep that fact represented when its exact quotation is
+        # recovered, rather than report the old ID as a missing requirement.
+        equivalent_ids = [
+            fact.id for fact in repaired.source_facts
+            if fact.source_page in (None, page)
+            and re.sub(r"\s+", "", fact.source_text) == evidence_key
+        ]
         repaired.source_facts.append(SourceFact(
             id=fact_id,
             kind=f"coverage_repair_{detail.category}",
@@ -317,13 +326,12 @@ def _append_details(notice: NoticeData, validated: list[tuple[RepairDetail, list
             text=correct_grounded_wording(detail.text.strip(), evidence),
             label=CATEGORY_LABELS[detail.category],
             source_evidence=evidence,
-            source_fact_ids=[fact_id],
+            source_fact_ids=[*equivalent_ids, fact_id],
             source_page=page,
             state=ReviewState.NEEDS_REVIEW,
         )
         replaced = False
         if len(units) == 1:
-            evidence_key = re.sub(r"\s+", "", evidence)
             for field in LABELED_FIELDS:
                 if detail.category == "funding" and field != "financial_support":
                     continue
@@ -336,7 +344,7 @@ def _append_details(notice: NoticeData, validated: list[tuple[RepairDetail, list
                         # A scope correction must replace an overbroad primary
                         # statement, rather than leave conflicting instructions.
                         primary.text = item.text
-                        primary.source_fact_ids = list(dict.fromkeys([*primary.source_fact_ids, fact_id]))
+                        primary.source_fact_ids = list(dict.fromkeys([*primary.source_fact_ids, *item.source_fact_ids]))
                         primary.state = ReviewState.NEEDS_REVIEW
                         replaced = True
         if replaced:
