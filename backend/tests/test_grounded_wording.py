@@ -9,6 +9,18 @@ from app.services.semantic import OpenAISemanticProvider, normalize_notice
 from app.services.text import simplified_text
 
 
+def test_leave_participation_retains_both_distinct_funding_exclusions() -> None:
+    source = "휴학생도 참여는 가능하나 연구비 및 활동비 지원 대상에서는 제외"
+    broad = "Leave students can participate but are excluded from funding support."
+    expected = "Students on leave may participate, but are excluded from both research funding and activity allowance support."
+
+    assert correct_grounded_wording(broad, source) == expected
+    assert correct_grounded_wording(expected, source) == expected
+    assert correct_grounded_wording("Eligibility", source) == "Eligibility"
+    assert correct_grounded_wording(broad, source.replace("및 활동비 ", "")) != expected
+    assert correct_grounded_wording(broad, "휴학생 참여 불가") == "Students on leave can participate but are excluded from funding support."
+
+
 def test_enrolled_status_is_restored_only_for_the_complete_cited_eligibility_clause() -> None:
     english = "Undergraduate students in the second semester of the 2026 academic year."
     source = "모집 대상: 2026학년도 2학기 학부 재학생"
@@ -117,7 +129,9 @@ def test_primary_output_corrects_mistranslations_only_with_cited_korean_evidence
 
     normalized = normalize_notice(notice)
 
-    assert normalized.audience[0].text == "Students on leave may participate."
+    assert normalized.audience[0].text == (
+        "Students on leave may participate, but are excluded from both research funding and activity allowance support."
+    )
     assert normalized.actions[0].action == (
         "Submit through the Extracurricular Integrated Management System (S Plus)."
     )

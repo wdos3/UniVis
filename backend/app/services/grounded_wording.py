@@ -4,7 +4,7 @@ import re
 
 
 _PAYER_TERMS = re.compile(r"납부|부담|입금|납입|수수료|등록금|참가비")
-_LEAVING_STUDENTS = re.compile(r"\bleaving students\b", re.IGNORECASE)
+_LEAVING_STUDENTS = re.compile(r"\b(?:leaving|leave) students\b", re.IGNORECASE)
 _COMPARATIVE_SYSTEM = re.compile(
     r"\b(?:comparative|comparison)(?:\s+and)?\s+integrated\s+management\s+system\b",
     re.IGNORECASE,
@@ -26,6 +26,7 @@ _ENROLLED_UNDERGRADUATES_SOURCE = re.compile(
     r"(?:모집대상[:：]?)?(20\d{2})학년도([12])학기학부재학생[.!。]?"
 )
 _RESEARCH_SPENDING_SOURCE = "연구비는기자재구입및대여,재료비,도서구입및인쇄비로사용가능"
+_LEAVE_FUNDING_EXCLUSION_SOURCE = "휴학생도참여는가능하나연구비및활동비지원대상에서는제외"
 
 
 def _match_case(original: str, replacement: str) -> str:
@@ -37,6 +38,8 @@ def correct_grounded_wording(text: str, source_evidence: str) -> str:
     if not text or not source_evidence:
         return text
     evidence = re.sub(r"\s+", "", source_evidence)
+    if evidence == _LEAVE_FUNDING_EXCLUSION_SOURCE and len(re.findall(r"[A-Za-z]+", text)) >= 4:
+        return "Students on leave may participate, but are excluded from both research funding and activity allowance support."
     enrollment = _ENROLLED_UNDERGRADUATES_SOURCE.fullmatch(evidence)
     if enrollment and len(re.findall(r"[A-Za-z]+", text)) >= 6 and not re.search(r"\benrolled\b", text, re.IGNORECASE):
         semester = "first" if enrollment[2] == "1" else "second"

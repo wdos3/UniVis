@@ -153,7 +153,7 @@ def test_corrected_sogang_fixture_keeps_all_grounded_requirements_in_english_dig
         ("Applications are open from August 24, 2026 through September 20, 2026.", "application"),
         ("Submit the application form, research plan, and personal information collection and use consent form through the S Plus integrated extracurricular management system.", "application"),
         ("Applicants must be undergraduates enrolled in semester 2 of academic year 2026.", "eligibility"),
-        ("Students on leave may participate but are excluded from research funding and activity allowance support.", "eligibility"),
+        ("Students on leave may participate, but are excluded from both research funding and activity allowance support.", "eligibility"),
         ("Each team must contain 2 to 5 undergraduate students.", "eligibility"),
         ("Students and teams receiving support from other on-campus programs for the same or similar research topics are restricted from participation.", "restriction"),
         ("Duplicate participation within this program is not allowed.", "restriction"),
@@ -345,7 +345,7 @@ def test_invented_primary_citation_is_removed_before_full_source_audit_recovers_
         )],
         source_facts=[SourceFact(id="F001", kind="eligibility", source_text=invented_quote)],
     )
-    complete = "Students on leave may participate but are excluded from research funding and activity allowance support."
+    complete = "Students on leave may participate, but are excluded from both research funding and activity allowance support."
     parsed = RepairResponse(
         represented_unit_ids=[], details=[_detail("P001-L0001", complete, "eligibility")],
         decorative=[], unresolved_unit_ids=[],
