@@ -18,6 +18,7 @@ _CONSENT_FORM = re.compile(
     re.IGNORECASE,
 )
 _UNSUPPORTED_AIX_EXPANSION = re.compile(r"\bAIX\s*\(\s*AI\s+Experience\s*\)", re.IGNORECASE)
+_ORIGINAL_AI_TECHNOLOGY = re.compile(r"\boriginal AI technolog(?:y|ies)\b", re.IGNORECASE)
 _RESEARCH_CARD_SOURCE = re.compile(r"연구비(?:는|사용[:：])?융합교육원(?:에)?방문하여카드결제[.!。]?")
 _OTHER_PROGRAMS = re.compile(r"\bother (?:university )?programs?\b", re.IGNORECASE)
 _SIMILAR_TOPICS = re.compile(r"\bsimilar (?:research )?topics?\b", re.IGNORECASE)
@@ -27,13 +28,14 @@ _ENROLLED_UNDERGRADUATES_SOURCE = re.compile(
 )
 _RESEARCH_SPENDING_SOURCE = "연구비는기자재구입및대여,재료비,도서구입및인쇄비로사용가능"
 _LEAVE_FUNDING_EXCLUSION_SOURCE = "휴학생도참여는가능하나연구비및활동비지원대상에서는제외"
+_REPORT_DEPENDENT_FUNDING_SOURCE = "지원금은2차에걸쳐지급하며결과보고서를제출한학생에한하여2차지원금지급"
 _RESEARCH_COURSE_AUDIENCE_SOURCE = re.compile(
     r"(?:모집대상[:：]?)?융합교육원에서인정하는연구관련과목을수강하며연구지도를받는학부생[.!。]?"
 )
 
 
 def _match_case(original: str, replacement: str) -> str:
-    return replacement.capitalize() if original[0].isupper() else replacement
+    return replacement[0].upper() + replacement[1:] if original[0].isupper() else replacement
 
 
 def correct_grounded_wording(text: str, source_evidence: str) -> str:
@@ -41,6 +43,11 @@ def correct_grounded_wording(text: str, source_evidence: str) -> str:
     if not text or not source_evidence:
         return text
     evidence = re.sub(r"\s+", "", source_evidence)
+    if evidence == _REPORT_DEPENDENT_FUNDING_SOURCE and len(re.findall(r"[A-Za-z]+", text)) >= 6:
+        return (
+            "Support funds are paid in two installments; only students who submit a final report "
+            "receive the second installment."
+        )
     if _RESEARCH_COURSE_AUDIENCE_SOURCE.fullmatch(evidence) and len(re.findall(r"[A-Za-z]+", text)) >= 6:
         return (
             "Undergraduate students taking research-related courses recognized by the Convergence Education Center "
@@ -62,6 +69,10 @@ def correct_grounded_wording(text: str, source_evidence: str) -> str:
             "research topics are restricted from participation."
         )
     corrected = text
+    if "AI원천기술" in evidence:
+        corrected = _ORIGINAL_AI_TECHNOLOGY.sub(
+            lambda match: _match_case(match.group(), "core AI technologies"), corrected,
+        )
     if "휴학생" in evidence:
         corrected = _LEAVING_STUDENTS.sub(
             lambda match: _match_case(match.group(), "students on leave"), corrected

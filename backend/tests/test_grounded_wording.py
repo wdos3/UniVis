@@ -9,6 +9,40 @@ from app.services.semantic import OpenAISemanticProvider, normalize_notice
 from app.services.text import simplified_text
 
 
+def test_installment_support_is_not_given_an_unsupported_scholarship_type() -> None:
+    source = "지원금은 2차에 걸쳐 지급하며 결과보고서를 제출한 학생에 한하여 2차 지원금 지급"
+    incorrect = "Scholarships will be paid in two installments, and the second installment requires a final report."
+    expected = (
+        "Support funds are paid in two installments; only students who submit a final report "
+        "receive the second installment."
+    )
+    notice = NoticeData(financial_support=[LabeledFact(text=incorrect, source_evidence=source)])
+
+    normalized = normalize_notice(notice)
+
+    assert normalized.financial_support[0].text == expected
+    assert normalized.financial_support[0].source_evidence == source
+    assert normalized.financial_support[0].state == ReviewState.NEEDS_REVIEW
+    assert correct_grounded_wording(expected, source) == expected
+    assert correct_grounded_wording("Payment", source) == "Payment"
+    assert correct_grounded_wording(incorrect, source.replace("지원금", "장학금")) == incorrect
+    assert correct_grounded_wording(incorrect, source.replace("2차", "3차")) == incorrect
+    assert correct_grounded_wording(incorrect, source + " (휴학생 제외)") == incorrect
+
+
+def test_fundamental_ai_technology_keeps_the_cited_research_topic() -> None:
+    english = "Designated topic 3: Research and development of original AI technology."
+    source = "지정 주제 3: AI 원천 기술 연구 개발"
+
+    assert correct_grounded_wording(english, source) == (
+        "Designated topic 3: Research and development of core AI technologies."
+    )
+    assert correct_grounded_wording("Original AI technology research and development.", source) == (
+        "Core AI technologies research and development."
+    )
+    assert correct_grounded_wording(english, "AI 응용 기술 연구 개발") == english
+
+
 def test_recognized_course_eligibility_keeps_the_research_supervision_qualification() -> None:
     source = "모집 대상: 융합교육원에서 인정하는 연구 관련 과목을 수강하며 연구지도를 받는 학부생"
     incomplete = "Undergraduate students taking research-related courses recognized by the Convergence Education Center."

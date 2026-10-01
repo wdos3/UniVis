@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from app.models import BoundingBox, LabeledFact, NoticeData, ReviewState, SourceFact, SourcePage
 from app.services.coverage import audit_coverage
 from app.services.coverage_coalescing import coalesce_exact_repair_duplicates
-from app.services.extraction.reconciliation import add_page_provenance
+from app.services.extraction.reconciliation import add_page_provenance, evidence_matches_page
 from app.services.text import simplified_text
 
 
@@ -124,3 +126,90 @@ def test_same_primary_text_from_distinct_source_lines_remains_separate() -> None
     merged = coalesce_exact_repair_duplicates(notice)
 
     assert len(merged.financial_support) == 2
+
+
+@pytest.mark.parametrize("full_quote_first", [False, True])
+def test_contained_partial_quote_keeps_the_exact_full_source_quote(full_quote_first: bool) -> None:
+    partial = "비용은 장학금 형태로 지급"
+    full = "연구비로 지원되는 항목 외의 비용은 장학금 형태로 지급"
+    first, second = (full, partial) if full_quote_first else (partial, full)
+    text = "Costs outside research-funded categories are paid as scholarships."
+    notice = NoticeData(
+        financial_support=[LabeledFact(
+            text=text, source_evidence=first, source_fact_ids=["F001"], source_page=1,
+        )],
+        key_details=[LabeledFact(
+            text=text, source_evidence=second, source_fact_ids=["F002"], source_page=1,
+        )],
+        source_facts=[
+            SourceFact(id="F001", kind="funding", source_text=first),
+            SourceFact(id="F002", kind="coverage_repair_funding", source_text=second),
+        ],
+    )
+
+    merged = coalesce_exact_repair_duplicates(notice)
+
+    kept = merged.financial_support[0]
+    assert merged.key_details == []
+    assert kept.source_evidence == full
+    assert kept.source_fact_ids == ["F001", "F002"]
+    assert [fact.source_text for fact in merged.source_facts] == [first, second]
+    assert evidence_matches_page(kept.source_evidence, full)
+    assert audit_coverage(merged, full).uncovered == []
+    add_page_provenance(merged, [full], [_source_page()])
+    assert kept.source_page == 1
+    assert kept.source_image_id == "page-1"
+
+
+def test_contained_quote_removal_preserves_disjoint_source_lines_and_fact_ids() -> None:
+    partial = "비용은 장학금 형태로 지급"
+    full = "연구비로 지원되는 항목 외의 비용은 장학금 형태로 지급"
+    disjoint = "연구비는 카드결제"
+    source = full + "\n문의: 융합교육혁신팀\n" + disjoint
+    text = "Other costs are paid as scholarships; research expenses are paid by card."
+    notice = NoticeData(
+        financial_support=[LabeledFact(
+            text=text, source_evidence=partial, source_fact_ids=["F001"], source_page=1,
+        )],
+        key_details=[LabeledFact(
+            text=text, source_evidence=full + "\n" + disjoint, source_fact_ids=["F002"], source_page=1,
+        )],
+        source_facts=[
+            SourceFact(id="F001", kind="funding", source_text=partial),
+            SourceFact(id="F002", kind="coverage_repair_funding", source_text=full + "\n" + disjoint),
+        ],
+    )
+
+    merged = coalesce_exact_repair_duplicates(notice)
+
+    kept = merged.financial_support[0]
+    assert kept.source_evidence == full + "\n" + disjoint
+    assert kept.source_fact_ids == ["F001", "F002"]
+    assert len(merged.source_facts) == 2
+    assert evidence_matches_page(kept.source_evidence, source)
+
+
+def test_contained_quote_on_another_page_retains_both_items_and_citations() -> None:
+    partial = "비용은 장학금 형태로 지급"
+    full = "연구비로 지원되는 항목 외의 비용은 장학금 형태로 지급"
+    text = "Costs outside research-funded categories are paid as scholarships."
+    notice = NoticeData(
+        financial_support=[LabeledFact(
+            text=text, source_evidence=partial, source_fact_ids=["F001"], source_page=1,
+        )],
+        key_details=[LabeledFact(
+            text=text, source_evidence=full, source_fact_ids=["F002"], source_page=2,
+        )],
+        source_facts=[
+            SourceFact(id="F001", kind="funding", source_text=partial, source_page=1),
+            SourceFact(id="F002", kind="coverage_repair_funding", source_text=full, source_page=2),
+        ],
+    )
+
+    merged = coalesce_exact_repair_duplicates(notice)
+
+    assert merged.financial_support[0].source_evidence == partial
+    assert merged.financial_support[0].source_fact_ids == ["F001"]
+    assert merged.key_details[0].source_evidence == full
+    assert merged.key_details[0].source_fact_ids == ["F002"]
+    assert [fact.source_page for fact in merged.source_facts] == [1, 2]

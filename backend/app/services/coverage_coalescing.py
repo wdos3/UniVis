@@ -17,15 +17,20 @@ def _english_key(text: str) -> str:
 
 
 def _combined_evidence(first: str, second: str) -> str:
-    lines: list[str] = []
+    lines: list[tuple[str, str]] = []
     seen: set[str] = set()
     for line in (*first.splitlines(), *second.splitlines()):
         clean = line.strip()
         key = re.sub(r"\s+", "", unicodedata.normalize("NFKC", clean)).casefold()
         if clean and key not in seen:
-            lines.append(clean)
+            lines.append((clean, key))
             seen.add(key)
-    return "\n".join(lines)
+    # A partial quote followed by its full source line is not two independently
+    # cited lines. Keep the containing quote so page provenance remains valid.
+    return "\n".join(
+        clean for clean, key in lines
+        if not any(key != other_key and key in other_key for _, other_key in lines)
+    )
 
 
 def _merge_evidence(kept: LabeledFact, duplicate: LabeledFact) -> None:
