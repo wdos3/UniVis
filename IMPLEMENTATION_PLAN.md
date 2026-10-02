@@ -48,3 +48,10 @@ than guessing or requiring Korean transcription. Retry from retained OCR is
 optional and must not rerun OCR or restore a replaced image's stale results.
 Review the complete diff, run checks, validate locally, deploy only the experimental
 branch to its existing Vercel alias, and repeat hosted usability/photo checks.
+
+Follow the observed repair losses through the actual pipeline: require complete
+targeted repairs and preserve nearby exact source context for continuations.
+Restore only explicit printed acronym expansions and source-backed consent names.
+Overlap independent photo baseline translation and Korean-source extraction while
+retaining stage timings, failure accounting, and joined cancellation. Verify these
+changes against retained positioned OCR and fresh hosted photographs before release.

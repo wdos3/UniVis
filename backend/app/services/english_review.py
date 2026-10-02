@@ -34,6 +34,21 @@ _BARE_ENGLISH_SCHEDULE = re.compile(
     re.IGNORECASE,
 )
 _EXPANDED_ONLINE_SCOPE = re.compile(r"\b(?:entire|all|every)\b", re.IGNORECASE)
+_OPEN_ENGLISH_ITEM_LIST = re.compile(
+    r"\bother\s+(?:(?:related|relevant|similar|required|supporting|necessary|associated|additional|eligible)\s+)*"
+    r"(?:expenses?|costs?|fees?|charges?|items?|documents?|forms?|certificates?|materials?|purchases?|resources?|supplies)\b|"
+    r"\betc\b\.?|\band\s+(?:so\s+on|the\s+like)\b|\bamong\s+others\b|\bnot\s+limited\s+to\b",
+    re.IGNORECASE,
+)
+_OPEN_SOURCE_ITEM_LIST = re.compile(
+    # 기타 can also name a guitar; only a following list category disambiguates it.
+    r"기타\s*(?:관련\s*)?(?:비용|경비|항목|서류|문서|자료|물품|재료|장비|용품|소모품|증명서)|"
+    r"그\s*외|이\s*외|"
+    r"(?<![고동평균상하대차항0-9])등(?=$|[\s,.;:：·、/)）]|(?:의|을|은|이|에|도|과|으로)(?=\s|[가-힣]))|"
+    r"같은\s*(?:서류|문서|자료|물품|항목|비용|경비|재료|장비|용품|것)|"
+    r"\betc\b|\bsuch\s+as\b|\bnot\s+limited\s+to\b",
+    re.IGNORECASE,
+)
 _EXPENSE_NOUN_FRAGMENT = re.compile(r"(?:비용|항목|경비|지출|소요비|재료비|구입비|인쇄비)[\s.,:：]*$")
 _SOURCE_RESTRICTION_MODALITY = re.compile(r"금지|불가|불허|제한|안\s*됨|않|못|사용\s*가능|사용\s*할\s*수")
 _EXPECTED_GRADUATION_SOURCE = re.compile(r"졸업\s*(?:[（(]\s*예정\s*[)）]|예정)")
@@ -48,7 +63,8 @@ _EXPECTED_GRADUATION_ENGLISH = re.compile(
 _GRADUATION_ALTERNATIVE_ENGLISH = re.compile(
     r"\bor\b|/|\b(?:including|either|also)\b|\bgraduat\w*\s*\(", re.IGNORECASE,
 )
-_INTERVIEW_DOCUMENT_PHASE = re.compile(r"면접(?:\s*전형)?\s*(전|후|시|때|단계|당일)")
+# 전형 names the interview process; its first syllable is not a before-stage marker.
+_INTERVIEW_DOCUMENT_PHASE = re.compile(r"면접(?:\s*전형)?\s*(전(?!형)|후|시|때|단계|당일)")
 _INTERVIEW_SUBMISSION_ENGLISH = {
     "전": re.compile(r"\bbefore\b[^.;\n]{0,40}\binterviews?\b", re.IGNORECASE),
     "후": re.compile(r"\bafter\b[^.;\n]{0,40}\binterviews?\b", re.IGNORECASE),
@@ -123,6 +139,18 @@ def _unassociated_source_fragment(field: EnglishSupportField) -> bool:
         and len(re.sub(r"\s+", "", source)) <= 20
         and not _SOURCE_RELATION.search(source)
     )
+
+
+def _unquoted_open_list_extension(field: EnglishSupportField) -> bool:
+    """A finite quoted list cannot authorize additional unspecified items."""
+    if not field.source_evidence or _OPEN_SOURCE_ITEM_LIST.search(field.source_evidence):
+        return False
+    for match in _OPEN_ENGLISH_ITEM_LIST.finditer(field.text):
+        # Explicitly excluding other items does not turn a list into examples.
+        if re.search(r"\b(?:no|not|without)\s+$", field.text[:match.start()], re.IGNORECASE):
+            continue
+        return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -252,6 +280,7 @@ async def review_notice_english(
     locally_rejected = {
         field.id for field in fields
         if _unassociated_source_fragment(field)
+        or _unquoted_open_list_extension(field)
         or (field.source_evidence and unsupported_currency_amounts(field.source_evidence, field.text))
         or (field.source_evidence and unsupported_source_dates(field.source_evidence, field.text))
         or broken_transliteration_reason(field.source_evidence, field.text, field=field.field, label=field.label)

@@ -15,6 +15,89 @@ from app.services.pipeline import PipelineResult
 from app.services.text import simplified_text
 
 
+@pytest.mark.parametrize("field,source,english", [
+    (
+        "financial_support", "기자재 구입 및 대여,재료비,",
+        "Fund usage may include purchase and rental of equipment, material costs, and other related expenses.",
+    ),
+    (
+        "financial_support", "지원금 사용: 교통비, 숙박비",
+        "The grant covers travel, accommodation, and other eligible costs.",
+    ),
+    (
+        "key_details", "제출 서류: 신청서, 재학증명서",
+        "Submit the application, enrollment certificate, and other supporting documents.",
+    ),
+    (
+        "key_details", "준비물: 신분증, 필기구",
+        "Bring identification, pens, etc.",
+    ),
+    (
+        "key_details", "고등학교 등록 안내: 신청서, 증명서 (동등 자격 인정)",
+        "Submit the application and certificates, including but not limited to these documents.",
+    ),
+    (
+        "financial_support", "시상: 1등 30만원, 2등 10만원",
+        "Prizes cover first and second place and other items.",
+    ),
+    (
+        "key_details", "준비물: 기타, 앰프",
+        "Bring a guitar, an amplifier, and other items.",
+    ),
+    (
+        "financial_support", "구입 가능: 기타, 앰프",
+        "Funding covers a guitar, an amplifier, and other related expenses.",
+    ),
+])
+def test_positive_final_verdict_cannot_extend_a_closed_quoted_item_list(monkeypatch, field, source, english):
+    independent_source = "문의: 학생지원팀"
+    notice = NoticeData(
+        contacts=[], key_details=[LabeledFact(text="Contact Student Support.", label="Contact", source_evidence=independent_source)],
+    )
+    getattr(notice, field).append(LabeledFact(text=english, label="Items", source_evidence=source))
+    full_source = f"{source}\n{independent_source}\n다른 프로그램: 기타 서류 제출"
+
+    async def approve(fields, *args, **kwargs):
+        assert english not in [item.text for item in fields]
+        return EnglishSupportResult(decisions=tuple(
+            EnglishSupportDecision(id=item.id, status="supported", reason="") for item in fields
+        ), requests=1, fully_covered_source_ids=frozenset(unit.id for unit in kwargs["source_units"]))
+
+    monkeypatch.setattr(english_review, "verify_english_support", approve)
+    result = asyncio.run(english_review.review_notice_english(notice, full_source))
+
+    assert english not in simplified_text(result.notice)
+    assert "Contact Student Support." in simplified_text(result.notice)
+    assert result.has_verification_gaps
+    assert getattr(notice, field)[-1].text == english
+
+
+@pytest.mark.parametrize("source,english", [
+    ("지원금: 교통비, 숙박비, 기타 비용", "The grant covers travel, accommodation, and other expenses."),
+    ("제출 서류: 신청서, 증명서, 기타 서류", "Submit the application, certificates, and other documents."),
+    ("제출 서류: 신청서, 증명서 등", "Submit the application, certificates, and other documents."),
+    ("제출 서류: 신청서, 증명서등을 준비", "Prepare the application, certificates, etc."),
+    ("신청서와 증명서 같은 서류를 제출", "Submit documents including the application and certificates, among others."),
+    ("지원금: 교통비 그 외 관련 비용", "The grant covers travel and other related costs."),
+    ("지출 항목: 장비 구입 등으로 사용", "Expenses include equipment purchases and so on."),
+    ("Documents: application form, etc.", "Submit the application form and other documents."),
+    ("제출 서류: 신청서 (추가 서류 불필요)", "Submit the application. No other documents are required."),
+])
+def test_explicit_open_lists_and_negated_other_items_remain_reviewable(monkeypatch, source, english):
+    notice = NoticeData(key_details=[LabeledFact(text=english, label="Items", source_evidence=source)])
+
+    async def approve(fields, *args, **kwargs):
+        assert [item.text for item in fields] == [english]
+        return EnglishSupportResult(decisions=tuple(
+            EnglishSupportDecision(id=item.id, status="supported", reason="") for item in fields
+        ), requests=1, fully_covered_source_ids=frozenset(unit.id for unit in kwargs["source_units"]))
+
+    monkeypatch.setattr(english_review, "verify_english_support", approve)
+    result = asyncio.run(english_review.review_notice_english(notice, source))
+
+    assert result.notice.key_details[0].text == english
+
+
 def test_final_review_withholds_repair_noise_without_removing_an_independent_supported_fact(monkeypatch):
     source = "접수 마감: 2027.5.10\n성울\n지원금: 2차는 결과보고서 제출 후 지급"
     notice = NoticeData(
@@ -488,6 +571,21 @@ def test_document_interview_timing_preserves_before_and_after(source, condition,
     prepared, gaps = english_review._prepare_review_notice(notice, source)
     assert bool(prepared.required_documents) is kept
     assert gaps is not kept
+
+
+@pytest.mark.parametrize("interview", ["면접전형", "면접 전형"])
+def test_interview_process_without_timing_does_not_imply_before_interview(interview):
+    source = f"{interview} 대상자는 성적증명서를 제출해야 합니다."
+    document = DocumentRequirement(
+        name="Transcript", condition="Applicants selected for the interview process must submit a transcript.",
+        source_evidence=source,
+    )
+    notice = NoticeData(required_documents=[document])
+
+    prepared, gaps = english_review._prepare_review_notice(notice, source)
+
+    assert prepared.required_documents == [document]
+    assert not gaps
 
 
 def test_expense_noun_fragment_cannot_become_a_restriction(monkeypatch):

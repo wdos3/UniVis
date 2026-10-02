@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from time import perf_counter
 from dataclasses import dataclass, field
@@ -67,22 +68,46 @@ async def analyze_text_pipeline(
     if not is_mock and not allow_partial and (corrections := contact_corrections(text)):
         raise SourceCorrectionRequired("Correct the unreadable phone number in the recovered text and retry.", corrections)
     translator = choose_translation_provider(mock=is_mock)
-    translation_started = perf_counter()
-    warnings: list[str] = []
-    try:
-        translation: TranslationResult = await translator.translate(text, "ko", target_language)
-    except TranslationError:
-        if not allow_partial or is_mock:
-            raise
-        translation = TranslationResult(text="", provider="unavailable", request_count=0)
-        warnings.append("The temporary translation service was unavailable. English instructions were interpreted directly from the recovered source; the separate baseline translation is unavailable.")
-    translation_latency_ms = round((perf_counter() - translation_started) * 1000)
-    semantic_started = perf_counter()
     semantic_options = {"layout_context": layout_context}
     if allow_partial:
         semantic_options["allow_partial"] = True
-    structured: SemanticResult = await semantic.analyze(text, translation.text, target_language, **semantic_options)
-    semantic_latency_ms = round((perf_counter() - semantic_started) * 1000)
+
+    async def translate_source() -> tuple[TranslationResult, int, list[str]]:
+        started = perf_counter()
+        warnings = []
+        try:
+            translation = await translator.translate(text, "ko", target_language)
+        except TranslationError:
+            if not allow_partial or is_mock:
+                raise
+            translation = TranslationResult(text="", provider="unavailable", request_count=0)
+            warnings.append("The temporary translation service was unavailable. English instructions were interpreted directly from the recovered source; the separate baseline translation is unavailable.")
+        return translation, round((perf_counter() - started) * 1000), warnings
+
+    async def extract_notice(baseline_translation: str) -> tuple[SemanticResult, int]:
+        started = perf_counter()
+        structured = await semantic.analyze(text, baseline_translation, target_language, **semantic_options)
+        return structured, round((perf_counter() - started) * 1000)
+
+    if allow_partial and not is_mock:
+        # Photo semantics deliberately use Korean evidence without the temporary
+        # translation. The baseline is still returned, but is not a dependency.
+        tasks = (asyncio.create_task(translate_source()), asyncio.create_task(extract_notice("")))
+        try:
+            translated, extracted = await asyncio.gather(*tasks)
+        except BaseException:
+            # gather propagates stage errors before all siblings finish. Join
+            # cancellation so an external request cannot outlive this pipeline.
+            for task in tasks:
+                if not task.done() and not task.cancelling():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        translation, translation_latency_ms, warnings = translated
+        structured, semantic_latency_ms = extracted
+    else:
+        translation, translation_latency_ms, warnings = await translate_source()
+        structured, semantic_latency_ms = await extract_notice(translation.text)
     return PipelineResult(
         source_text=text,
         translation=translation.text,

@@ -5,7 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.models import Action, DocumentRequirement, LabeledFact, NoticeData, ReviewState
+from app.services import english_review
 from app.services.coverage_repair import RepairDetail, RepairResponse, repair_coverage
+from app.services.english_verification import EnglishSupportDecision, EnglishSupportResult
 from app.services.grounded_wording import correct_grounded_wording
 from app.services.semantic import OpenAISemanticProvider, normalize_notice
 from app.services.text import simplified_text
@@ -121,6 +123,197 @@ def test_local_glossary_does_not_replace_acronyms_or_their_expansions() -> None:
     )
 
 
+@pytest.mark.parametrize(("source", "english", "expected"), [
+    (
+        "MVP(Minimum Value\nPrototyping) 제작",
+        "Develop an MVP for the selected research topic.",
+        "Develop an MVP (Minimum Value Prototyping) for the selected research topic.",
+    ),
+    (
+        "HSS (Housing Support Scheme) 신청",
+        "Apply to HSS by the deadline.",
+        "Apply to HSS (Housing Support Scheme) by the deadline.",
+    ),
+    (
+        "HSS \n  (Housing Support Scheme) 신청",
+        "Apply to HSS by the deadline.",
+        "Apply to HSS (Housing Support Scheme) by the deadline.",
+    ),
+    (
+        "HSS(Housing Support Scheme), HSS (Housing   Support\nScheme)",
+        "HSS applicants may contact the HSS office.",
+        "HSS (Housing Support Scheme) applicants may contact the HSS (Housing Support Scheme) office.",
+    ),
+    (
+        "QOL(Quality of Life) 안내",
+        "Apply for the QOL program.",
+        "Apply for the QOL (Quality of Life) program.",
+    ),
+])
+def test_acronym_restoration_copies_only_the_explicit_quoted_english_expansion(source, english, expected) -> None:
+    assert correct_grounded_wording(english, source) == expected
+    assert correct_grounded_wording(expected, source) == expected
+
+
+@pytest.mark.parametrize(("source", "english"), [
+    ("MVP 제작", "Develop an MVP."),
+    ("MVP(Minimum Value Prototyping)", "Develop a prototype."),
+    ("MVP(Minimum Value Prototyping)", "Develop an MVP (Minimum Viable"),
+    ("MVP(Minimum Value Prototyping)", "Develop an MVP — (Minimum Viable Product)."),
+    ("MVP(Minimum Value Prototyping)", "Develop an MVP [Minimum Viable Product]."),
+    ("MVP(Minimum Value Prototyping)", "Develop an MVP through Minimum Viable Prototyping."),
+    ("MVP(Minimum Value Prototyping)", "Develop an MVP through Minimum Viable Product."),
+    ("MVP(Minimum Value Prototyping)", "Develop an MVP through minimum viable product."),
+    ("MVP(Minimum Value Prototyping)", "Develop an MVP through Minimum Value Prototyping."),
+    ("MVP(Minimum Value Prototyping)", "MVP development uses value prototyping."),
+    ("MVP(Minimum Value Prototyping)", "Prototyping is part of MVP development."),
+    ("HSS(Housing Support Scheme)", "Apply to HSS through the Housing Subsidy Scheme."),
+    ("HSS(Housing Support Scheme)", "The Housing Support Scheme accepts HSS applications."),
+    ("HSS(Housing Support Scheme)", "Apply to HSS to receive housing assistance."),
+    ("HSS(Housing Support Scheme)", "Apply to HSS (optional)."),
+    ("HSS(Housing Support Scheme)", "Apply to HSS (for enrolled students)."),
+    ("HSS(Housing Support Scheme)", "Apply to HSS (for Housing Support)."),
+    ("HSS(Housing Support Scheme)", "Apply to HSS (minimum score 80)."),
+    ("HSS(Housing Support Scheme)", "Apply to HSS (Housing Support is required)."),
+    ("HSS(Housing Support Scheme)", "Apply to HSS (Housing Support only)."),
+    ("HSS(Housing Support Scheme)", "Apply to HSS (Housing Support is not available)."),
+    ("MVP(Minimum Value Prototyping)", "Develop an MVP (Minimum Viable Product) through Minimum Viable Prototyping."),
+    ("MVP(Minimum Value Prototyping)", "Prototyping is part of MVP (Minimum Viable Product) development."),
+    ("MVP(Minimum Value Prototyping)", "Develop an MVP (Minimum (Viable) Product)."),
+    ("MVP(Minimum Value Prototyping)", "Develop MVPs or an AMVP."),
+    ("MVP(Minimum Value Prototyping)", "Develop an mvp."),
+    ("MVP(Minimum Value Prototyping)", "Develop an MVP2."),
+    ("MVP(Minimum Value Prototyping", "Develop an MVP."),
+    ("MVP((Minimum Value Prototyping)", "Develop an MVP."),
+    ("MVP(Minimum Value (Prototyping))", "Develop an MVP."),
+    ("MVP(최소 가치 프로토타이핑)", "Develop an MVP."),
+    ("MVP(Minimum Value 프로토타이핑)", "Develop an MVP."),
+    ("MVP()", "Develop an MVP."),
+    ("MVP(2026)", "Develop an MVP."),
+    ("HSS\n\n(Housing Support Scheme)", "Apply to HSS."),
+    ("HSS\n다른 사업\n(Housing Support Scheme)", "Apply to HSS."),
+    ("MVP(Minimum Value Prototyping), MVP(Minimum Viable Product)", "Develop an MVP."),
+    ("MVP(Minimum Value Prototyping), MVP(최소 가치 프로토타이핑)", "Develop an MVP."),
+    ("MVP(Minimum Value Prototyping), MVP(Minimum Viable", "Develop an MVP."),
+])
+def test_acronym_restoration_preserves_missing_conflicting_ambiguous_and_unreadable_expansions(source, english) -> None:
+    assert correct_grounded_wording(english, source) == english
+
+
+@pytest.mark.parametrize(("source", "english", "expected"), [
+    (
+        "MVP(Minimum Value\nPrototyping) 제작",
+        "Develop an MVP (Minimum Viable Product Prototyping) for the selected topic.",
+        "Develop an MVP (Minimum Value Prototyping) for the selected topic.",
+    ),
+    (
+        "MVP(Minimum Value Prototyping) 제작",
+        "Develop an MVP(Minimum Viable Product).",
+        "Develop an MVP(Minimum Value Prototyping).",
+    ),
+    (
+        "HSS(Housing Support Scheme) 신청",
+        "Apply to HSS (Housing Allowance Scheme) by the deadline.",
+        "Apply to HSS (Housing Support Scheme) by the deadline.",
+    ),
+    (
+        "HSS(Health Safety Standard) 안내",
+        "HSS (Housing Support Scheme) applies to applicants.",
+        "HSS (Health Safety Standard) applies to applicants.",
+    ),
+    (
+        "MVP(Minimum Value Prototyping) 제작",
+        "Develop an MVP (Minimum Viable Product) and another MVP.",
+        "Develop an MVP (Minimum Value Prototyping) and another MVP (Minimum Value Prototyping).",
+    ),
+])
+def test_complete_attached_expansions_use_only_the_unique_literal_in_the_field_quote(source, english, expected) -> None:
+    assert correct_grounded_wording(english, source) == expected
+    assert correct_grounded_wording(expected, source) == expected
+    assert correct_grounded_wording(english, "사업 안내") == english
+
+
+@pytest.mark.parametrize("english", [
+    "Develop an MVP (Minimum Value Prototyping).",
+    "Develop an MVP (minimum value prototyping).",
+    "Develop an MVP(Minimum   Value Prototyping).",
+])
+def test_already_correct_attached_expansions_preserve_existing_english_spacing_and_case(english) -> None:
+    assert correct_grounded_wording(english, "MVP(Minimum Value Prototyping) 제작") == english
+
+
+def test_attached_expansion_correction_preserves_quote_and_requires_independent_review(monkeypatch) -> None:
+    source = "HSS(Housing Support Scheme) 소개"
+    notice = normalize_notice(NoticeData(key_details=[LabeledFact(
+        text="HSS (Housing Allowance Scheme) is mandatory.", source_evidence=source,
+        source_page=1, state=ReviewState.VERIFIED,
+    )]), source_text=source)
+    corrected = "HSS (Housing Support Scheme) is mandatory."
+    assert notice.key_details[0].text == corrected
+    assert notice.key_details[0].source_evidence == source
+    assert notice.key_details[0].state == ReviewState.NEEDS_REVIEW
+
+    async def reject(fields, actual_source, **kwargs):
+        assert actual_source == source
+        assert [field.text for field in fields] == [corrected]
+        return EnglishSupportResult(
+            decisions=(EnglishSupportDecision(id=fields[0].id, status="unsupported", reason="No mandatory condition."),),
+            requests=1, unverified_source_ids=frozenset(unit.id for unit in kwargs["source_units"]),
+        )
+
+    monkeypatch.setattr(english_review, "verify_english_support", reject)
+    result = asyncio.run(english_review.review_notice_english(notice, source))
+
+    assert result.notice.key_details == []
+    assert result.has_verification_gaps
+    assert result.unverified_source_units == 1
+
+
+def test_whole_source_context_cannot_expand_an_uncited_summary() -> None:
+    source = "HSS(Housing Support Scheme) 신청\n다른 사업 지원 안내"
+    notice = NoticeData(
+        summary="HSS applications are open.",
+        purpose="Explain HSS applications.",
+        key_details=[
+            LabeledFact(text="Apply to HSS.", source_evidence="HSS(Housing Support Scheme) 신청"),
+            LabeledFact(text="HSS support is available.", source_evidence="다른 사업 지원 안내"),
+        ],
+    )
+
+    normalized = normalize_notice(notice, source_text=source)
+
+    assert normalized.summary == "HSS applications are open."
+    assert normalized.purpose == "Explain HSS applications."
+    assert normalized.key_details[0].text == "Apply to HSS (Housing Support Scheme)."
+    assert normalized.key_details[0].source_evidence == "HSS(Housing Support Scheme) 신청"
+    assert normalized.key_details[0].state == ReviewState.NEEDS_REVIEW
+    assert normalized.key_details[1].text == "HSS support is available."
+    assert correct_grounded_wording("HSS application", source, restore_expansions=False) == "HSS application"
+
+
+def test_audit_added_detail_restores_the_expansion_from_its_exact_quoted_source_units() -> None:
+    source = "MVP(Minimum Value\nPrototyping) 제작"
+    parsed = RepairResponse(
+        represented_unit_ids=[],
+        details=[RepairDetail(
+            unit_ids=["P001-L0001", "P001-L0002"],
+            text="Develop an MVP.", category="application", certain=True,
+        )], decorative=[], unresolved_unit_ids=[],
+    )
+
+    class Responses:
+        async def parse(self, **kwargs):
+            return SimpleNamespace(output_parsed=parsed, usage=None)
+
+    result = asyncio.run(repair_coverage(
+        NoticeData(), source, client=SimpleNamespace(responses=Responses()),
+    ))
+
+    assert result.notice.key_details[0].text == "Develop an MVP (Minimum Value Prototyping)."
+    assert result.notice.key_details[0].source_evidence == source
+    assert result.notice.key_details[0].state == ReviewState.NEEDS_REVIEW
+
+
 def test_placeholder_key_detail_label_is_not_displayed_as_a_section_header() -> None:
     notice = NoticeData(key_details=[LabeledFact(
         label="key_details", text="Students may choose their own research topic.",
@@ -176,6 +369,60 @@ def test_audit_added_consent_bullet_uses_specific_cited_name() -> None:
 
     assert result.notice.key_details[0].text == "Submit a personal information collection and use consent form."
     assert result.notice.key_details[0].source_evidence == source
+
+
+@pytest.mark.parametrize("name", [
+    "Consent for Data Collection",
+    "Consent for Data Collection and Use",
+    "Consent for Personal Information Collection",
+    "Personal Information Consent",
+    "Personal Information Consent Form",
+])
+def test_incomplete_consent_document_names_require_the_full_cited_korean_document(name) -> None:
+    evidence = "제출 서류: 개인정보 수집 및 이용 동의서"
+
+    assert correct_grounded_wording(name, evidence) == "Personal information collection and use consent form"
+    assert correct_grounded_wording(name, "데이터 수집 동의") == name
+    assert correct_grounded_wording(name, "개인정보 수집 동의서") == name
+
+
+@pytest.mark.parametrize("english", [
+    "Obtain consent for data collection.",
+    "Personal information consent is optional.",
+    "Consent for data collection after approval.",
+    "Personal information collection and use consent form",
+])
+def test_consent_name_correction_does_not_rewrite_verb_phrases_or_complete_names(english) -> None:
+    assert correct_grounded_wording(english, "개인정보 수집 및 이용 동의서") == english
+
+
+@pytest.mark.parametrize("english", [
+    "Consent Form for Personal Information Collection and Use",
+    "Consent form for the personal information collection and use",
+    "Personal Information Collection and Use Consent Form",
+    "Submit the Consent Form for Personal Information Collection and Use.",
+])
+def test_complete_consent_name_scope_is_not_repeated_after_consent_form(english) -> None:
+    assert correct_grounded_wording(english, "개인정보 수집 및 이용 동의서") == english
+
+
+def test_nominal_consent_document_correction_preserves_grounding_and_review_state() -> None:
+    evidence = "지원서, 연구계획서, 개인정보 수집 및 이용 동의서"
+    notice = NoticeData(
+        actions=[Action(
+            step=1, action="Submit the documents.",
+            required_items=["Consent for Data Collection"], source_evidence=evidence,
+        )],
+        required_documents=[DocumentRequirement(name="Personal Information Consent", source_evidence=evidence)],
+    )
+
+    normalized = normalize_notice(notice)
+
+    assert normalized.actions[0].required_items == ["Personal information collection and use consent form"]
+    assert normalized.required_documents[0].name == "Personal information collection and use consent form"
+    for item in (normalized.actions[0], normalized.required_documents[0]):
+        assert item.source_evidence == evidence
+        assert item.state == ReviewState.NEEDS_REVIEW
 
 
 def test_observed_are_paid_card_wording_is_recast_as_a_purchase_procedure() -> None:

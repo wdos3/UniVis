@@ -167,7 +167,7 @@ the failed references are not successes or OCR measurements.
 
 ### Automated checks and reviewed fixes
 
-Final backend checks: `python -m pytest backend/tests -q` **706 passed**;
+Final backend checks: `python -m pytest backend/tests -q` **858 passed**;
 `ruff check backend/app backend/tests` passed. Six dependency deprecation warnings
 remain. Frontend: `npm run test` **75 passed in nine files**, `npm run lint`,
 and `npm run build` (TypeScript, Vite, V1 asset aliases) passed. `git diff --check`
@@ -192,7 +192,79 @@ Unknown IDs never introduce facts. Strict verification defaults still reject
 malformed partitions. These are behavioral regression tests, not an empirical
 translation-accuracy score.
 
-Final deployment and hosted-photo measurements are recorded after release checks.
+The first Oct 2 release (`bad9cbcccf9d7e5614c8472f70dc28b8b4baeb26`,
+deployment `dpl_C9y2RWAb46oz71DKXjexjdmMT2f7`) was Ready on the existing alias.
+Root, health, current JS, worker, WASM and QR assets returned HTTP 200; public
+`/api/notices` returned the expected HTTP 403. A fresh unedited primary photo
+returned a partial English result: UI wall 120.5 s, OCR 49.5 s, translation
+1.5 s, semantic 69.1 s, five calls and 32,979 reported tokens. OCR preparation
+was 4.1 s, detection 28.2 s, recognition 15.6 s, parallel QR 1.4 s, with two
+additional small-text checks. Model assets may have been cached; this is not a
+cold-download benchmark. The old global banner was absent. Important research
+topics and spending/payment details were still missing, so this run did not
+satisfy the complete-primary-notice goal.
+
+## Repair-context and independent-stage follow-through
+
+The actual retained primary OCR trace showed incomplete targeted requirements,
+incorrect source-ID associations and isolated spending continuations. Every retry
+target now requires a complete detail. Explicit nearby read-only context lets a
+repair quote a heading or completing clause while target assignments remain
+exactly once. Unknown, repeated-within-detail, targeted, blocked or cross-page
+context cannot establish a claim. Photo mode quarantines dependent invalid
+groups; strict mode rejects invalid context. Shared context between independent
+details is permitted, and context does not inflate repaired-unit counts.
+
+Quoted English acronym expansions are restored when wholly omitted and uniquely
+explicit in the field's evidence. A complete, directly attached English
+parenthetical definition can also be corrected to that exact printed expansion;
+word overlap or matching acronym initials must identify it as a definition.
+Numeric, conditional, negated, malformed, ambiguous or unparenthesized conflicting
+wording remains for semantic repair. Restored wording cannot revive a known
+rejected claim.
+Nominal consent-document names can retain the full printed personal-information
+collection-and-use scope. Whole-page title/summary context does not trigger
+acronym insertion. The interview-stage guard distinguishes `전형` (selection
+process) from `전` (before), avoiding a false rejection of interview applicants'
+documents.
+
+The non-mock photo baseline translation now overlaps Korean-source extraction,
+which deliberately does not consume that translation. Individual stage timings
+remain measured, total time accounts for overlap, and fatal errors or cancellation
+cancel and join sibling requests. Strict text/document and mock dependencies are
+unchanged. Controlled tests establish overlap, not a measured live speedup.
+
+Source continuations beginning with a standalone genitive or connector must quote
+their preceding clause before assigning a subject or alternative. Targeted retry
+includes the preceding same-page line, including for a final source unit, and
+keeps blocked text withheld. Grouped quotations use source order rather than
+model-supplied ID order. Counterfactual tests cover an unrelated identity-document
+alternative as well as the observed research-topic split.
+
+Explicit open parentheticals and a trailing dependent matching modifier also
+require their actual following source line. Incomplete groups are retried and
+withheld if the source relationship cannot be recovered; citations are never
+silently widened. Final English review locally excludes open-ended extensions
+such as “other related expenses” when the field's quotation supplies a closed
+list. Explicit open lists remain eligible for semantic review. Unrelated
+page-level wording and a guitar named `기타` cannot authorize extra items.
+
+Follow-through provider runs used the original retained positioned OCR, without
+another OCR pass or Korean editing. The primary returned HTTP 200 in 62.203 s
+backend wall time: translation 3.060 s, semantic 61.297 s (extraction 18.281 s,
+coverage 34.890 s, final review 8.123 s), four calls and 28,705 reported tokens.
+Its reported total 98.936 s includes the earlier 36.951 s OCR. It retained the
+MVP printed expansion, application documents, equipment rental, books and
+printing. It still omitted the AI-function clause, misworded some research scope,
+and added unsupported “other related expenses.” A subsequent local guard was
+motivated by this observed failure; this run is not a success for complete output.
+
+The positioned KCCI replay returned HTTP 200 in 89.760 s backend wall time:
+translation 3.194 s, semantic 88.915 s, five calls and 37,748 tokens. Reported total
+116.465 s includes the earlier 26.962 s OCR. All six printed score pairs survived,
+but preferences still appeared as eligibility and selection stages were
+incomplete. Neither replay establishes a controlled latency improvement or
+universal correctness; provider responses varied between attempts.
 
 The last guards additionally withhold a graduation document missing its explicit
 expected-graduation alternative or interview stage, detached expense noun phrases

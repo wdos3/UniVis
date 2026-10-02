@@ -457,8 +457,8 @@ def normalize_notice(notice: NoticeData, *, source_text: str = "") -> NoticeData
             evidence = getattr(item, "source_evidence", "") or getattr(item, "source_text", "")
             matches = [number for number, text in page_sources.items() if evidence_matches_page(evidence, text)]
             item.source_page = matches[0] if len(matches) == 1 else None
-        notice.purpose = correct_grounded_wording(notice.purpose, source_text)
-        notice.summary = correct_grounded_wording(notice.summary, source_text)
+        notice.purpose = correct_grounded_wording(notice.purpose, source_text, restore_expansions=False)
+        notice.summary = correct_grounded_wording(notice.summary, source_text, restore_expansions=False)
     for fact in notice.source_facts:
         if fact.kind.strip().lower() in {"heading", "title", "program_title", "notice_title"}:
             fact.critical = False

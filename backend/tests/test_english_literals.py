@@ -378,18 +378,34 @@ def test_required_repair_detail_cannot_change_a_literal_english_phrase() -> None
     assert result.notice.key_details[0].text.endswith("Minimum Value Prototyping.")
 
 
-def test_split_ocr_literal_is_checked_against_final_digest() -> None:
+def test_split_parenthetical_source_requires_a_complete_group() -> None:
     source = "MVP(Minimum Value\nPrototyping)의 개발"
     separate_details = [
         _detail(["P001-L0001"], "Develop an MVP through Minimum Viable research."),
         _detail(["P001-L0002"], "Build a prototype."),
     ]
 
-    with pytest.raises(CoverageProviderError, match="Page 1 still alters or omits literal English"):
+    with pytest.raises(CoverageProviderError, match="open source parenthetical"):
         _repair(source, separate_details)
 
     result = _repair(source, [_detail(
         ["P001-L0001", "P001-L0002"],
         "Develop an MVP (Minimum Value Prototyping).",
+    )])
+    assert result.repaired_unit_count == 2
+
+
+def test_split_quoted_literal_is_checked_against_final_digest() -> None:
+    source = '"Safety\nFirst" 교육'
+    separate_details = [
+        _detail(["P001-L0001"], "Safety training."),
+        _detail(["P001-L0002"], "Priority guidance."),
+    ]
+
+    with pytest.raises(CoverageProviderError, match="Page 1 still alters or omits literal English"):
+        _repair(source, separate_details)
+
+    result = _repair(source, [_detail(
+        ["P001-L0001", "P001-L0002"], 'Attend "Safety First" training.',
     )])
     assert result.repaired_unit_count == 2

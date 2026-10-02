@@ -8,6 +8,11 @@ Version 2 separates the notice pipeline into three replaceable portions:
 
 An analysis can make several OpenAI calls: initial structured extraction, English-field repair when needed, a source-line completeness audit, possibly a targeted audit retry, and a bounded final English support check for photos. Photo extraction assigns fact IDs locally from exact quotations and interprets Korean directly; MyMemory remains a separate baseline. Grounded photo candidates are retained internally for final review even when an earlier audit cannot certify them. The review checks each English claim and the complete meaning of each recovered source unit; uncertain candidates are withheld. The response records stage timings, request counts, and available token usage. Version 1 remains unchanged in `../visnotice` apart from its explicit Version 1 branding.
 
+Non-mock photo extraction runs alongside the independent baseline translation.
+Targeted photo repairs can quote exact nearby source context to retain
+heading/continuation relationships. Explicit printed acronym expansions can be
+restored from the field's own quotation; no expansion is inferred from memory.
+
 **Visualizing Korean University Notices for International Students**
 
 VisNotice is a local research prototype that turns a photograph, screenshot, PDF, or Korean text notice into three independently presentable conditions:
@@ -148,7 +153,7 @@ With no key, the app starts in mock mode and explains that arbitrary real notice
 4. For image input, inspect original pages and OCR-recovered Korean text. Local Python/Docker image analysis also reports quality warnings and QR results; the hosted browser route attempts QR URL decoding locally.
 5. Inspect Translation, Simplified Text, and Visual Instructions.
 6. Turn on **Show source evidence** to compare English items with Korean phrases, fact IDs, and source pages.
-7. Photo recovery and audit retries run automatically. The app opens English simplified text first. A **Partial interpretation** banner and English gaps identify withheld details. **Retry English interpretation** reuses the recognized text and positions without repeating OCR or requiring Korean transcription. Source editing is optional; local **Researcher View** also supports structured-data/template corrections.
+7. Photo recovery and audit retries run automatically. The app opens English simplified text first. A **Partial interpretation** status and English source gaps identify withheld details. **Retry English interpretation** reuses the recognized text and positions without repeating OCR or requiring Korean transcription. Source editing is optional; local **Researcher View** also supports structured-data/template corrections.
 8. Use **Print / Save PDF** for a clean student-facing export.
 
 Image-only PDFs are rendered and processed by local Python/Docker OCR; the hosted

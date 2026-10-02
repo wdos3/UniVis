@@ -226,8 +226,9 @@ def test_missing_source_unit_gets_one_focused_retry() -> None:
     assert [item.text for item in result.notice.financial_support] == [
         "Research funding is available.", "Activity funding is available.",
     ]
-    assert '"id": "P001-L0002"' in calls[1]["input"][1]["content"]
-    assert '"id": "P001-L0001"' not in calls[1]["input"][1]["content"]
+    retry_payload = json.loads(calls[1]["input"][1]["content"])
+    assert [unit["id"] for unit in retry_payload["source_units"]] == ["P001-L0002"]
+    assert [unit["id"] for unit in retry_payload["read_only_context_units"]] == ["P001-L0001"]
 
 
 def test_uncertain_or_untranslated_detail_fails_closed() -> None:
@@ -939,6 +940,8 @@ def test_cited_wrong_date_or_test_score_gets_targeted_retry(source: str, wrong: 
 
     assert result.requests == len(calls) == 2
     assert result.notice.key_details[-1].text == correct
+    retry_payload = json.loads(calls[1]["input"][1]["content"])
+    assert all(unit["requires_full_detail"] for unit in retry_payload["source_units"])
 
 
 def test_uncited_unit_wrongly_marked_represented_gets_targeted_retry() -> None:
@@ -2353,3 +2356,429 @@ def test_grouped_restriction_preserves_the_actual_recipients_and_topic_scope() -
     result, _ = _run_repair(source, parsed, allow_partial=True)
     assert correct in simplified_text(result.notice)
     assert not result.has_verification_gaps
+
+
+@pytest.mark.parametrize("allow_partial", [False, True])
+def test_targeted_spending_and_card_repairs_share_read_only_funding_context(allow_partial: bool) -> None:
+    lines = [
+        "연구비: 1인당 최대 30만원", "기자재 구입 및 대여,재료비,",
+        "도서 구입 및 인쇄비로 사용 가능", "담당 부서에 방문하여 카드결제",
+    ]
+    notice = NoticeData(financial_support=[LabeledFact(
+        text="Research funding is up to KRW 300,000 per person.", source_evidence=lines[0], source_page=1,
+    )])
+    initial = RepairResponse(
+        represented_unit_ids=["P001-L0001"], details=[], decorative=[],
+        unresolved_unit_ids=["P001-L0002", "P001-L0003", "P001-L0004"],
+    )
+    spending = (
+        "Research funding of up to KRW 300,000 per person covers equipment purchases and rentals, "
+        "materials, books, and printing."
+    )
+    card = (
+        "To pay research expenses covered by funding of up to KRW 300,000 per person, "
+        "visit the responsible office and pay by card."
+    )
+    retry = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[
+        RepairDetail(unit_ids=["P001-L0002", "P001-L0003"], context_unit_ids=["P001-L0001"],
+                     text=spending, category="funding", certain=True),
+        RepairDetail(unit_ids=["P001-L0004"], context_unit_ids=["P001-L0001"],
+                     text=card, category="funding", certain=True),
+    ])
+
+    result, calls = _run_repair("\n".join(lines), [initial, retry], notice=notice, allow_partial=allow_partial)
+
+    assert result.repaired_unit_count == 3
+    assert spending in simplified_text(result.notice) and card in simplified_text(result.notice)
+    assert not result.has_verification_gaps
+    payload = json.loads(calls[1]["input"][1]["content"])
+    assert [unit["id"] for unit in payload["source_units"]] == ["P001-L0002", "P001-L0003", "P001-L0004"]
+    assert all(unit["requires_full_detail"] for unit in payload["source_units"])
+    assert [unit["id"] for unit in payload["read_only_context_units"]] == ["P001-L0001"]
+    assert next(item for item in result.notice.financial_support if item.text == spending).source_evidence == "\n".join(lines[:3])
+    assert next(item for item in result.notice.financial_support if item.text == card).source_evidence == "\n".join([lines[0], lines[3]])
+    if allow_partial:
+        assert result.review_candidates is not None
+        assert spending in simplified_text(result.review_candidates) and card in simplified_text(result.review_candidates)
+
+
+@pytest.mark.parametrize("allow_partial", [False, True])
+def test_targeted_housing_fee_and_restriction_use_exact_completing_context(allow_partial: bool) -> None:
+    lines = ["기숙사 이용료: 월 12만원", "매월 5일까지 납부", "중복 신청자의 입사 신청서는", "접수하지 않음"]
+    notice = NoticeData(fees=[LabeledFact(
+        text="The dormitory fee is KRW 120,000 per month.", source_evidence=lines[0], source_page=1,
+    )])
+    initial = RepairResponse(
+        represented_unit_ids=["P001-L0001"],
+        details=[_detail("P001-L0004", "Applications are not accepted.", "restriction")], decorative=[],
+        unresolved_unit_ids=["P001-L0002", "P001-L0003"],
+    )
+    fee = "Pay the monthly dormitory fee of KRW 120,000 by the 5th of each month."
+    restriction = "Dormitory applications from duplicate applicants are not accepted."
+    retry = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[
+        RepairDetail(unit_ids=["P001-L0002"], context_unit_ids=["P001-L0001"],
+                     text=fee, category="fee", certain=True),
+        RepairDetail(unit_ids=["P001-L0003"], context_unit_ids=["P001-L0004"],
+                     text=restriction, category="restriction", certain=True),
+    ])
+
+    result, calls = _run_repair("\n".join(lines), [initial, retry], notice=notice, allow_partial=allow_partial)
+
+    assert result.requests == len(calls) == 2
+    assert result.repaired_unit_count == 3  # The first audit repaired only the separate final line.
+    assert fee in simplified_text(result.notice) and restriction in simplified_text(result.notice)
+    assert next(item for item in result.notice.fees if item.text == fee).source_evidence == "\n".join(lines[:2])
+    assert next(item for item in result.notice.key_details if item.text == restriction).source_evidence == "\n".join(lines[2:])
+    assert not result.has_verification_gaps
+
+
+@pytest.mark.parametrize("invalid_context", [
+    ["P001-L9999"], ["P001-L0001", "P001-L0001"], ["P001-L0003"], ["P002-L0001"], ["P001-L0004"],
+])
+@pytest.mark.parametrize("allow_partial", [False, True])
+def test_invalid_targeted_context_is_rejected_without_losing_independent_repairs(invalid_context, allow_partial):
+    lines = ["지원금: 1인당 5만원", "재료비로 사용 가능", "신청서 제출", "행사장 참석"]
+    source = "[Page 1]\n" + "\n".join(lines) + "\n[Page 2]\n후원금: 1인당 7만원"
+    notice = NoticeData(financial_support=[LabeledFact(
+        text="Support is KRW 50,000 per person.", source_evidence=lines[0], source_page=1,
+    )])
+    initial = RepairResponse(represented_unit_ids=["P001-L0001"], decorative=[], details=[
+        _detail("P001-L0004", "Attend the venue.", "application"),
+        _detail("P002-L0001", "Sponsorship is KRW 70,000 per person.", "funding"),
+    ], unresolved_unit_ids=["P001-L0002", "P001-L0003"])
+    unsupported = "Support of KRW 50,000 per person may be used for materials."
+    independent = "Submit the application form."
+    retry = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[
+        RepairDetail(unit_ids=["P001-L0002"], context_unit_ids=invalid_context,
+                     text=unsupported, category="funding", certain=True),
+        _detail("P001-L0003", independent, "application"),
+    ])
+    args = dict(notice=notice, allow_partial=allow_partial, unverified_source_texts=(lines[3],))
+
+    if not allow_partial:
+        with pytest.raises(CoverageProviderError, match="invalid read-only source context"):
+            _run_repair(source, [initial, retry], **args)
+        return
+    result, calls = _run_repair(source, [initial, retry], **args)
+
+    assert result.requests == len(calls) == 2
+    assert independent in simplified_text(result.notice)
+    assert unsupported not in simplified_text(result.notice)
+    assert result.review_candidates is not None
+    assert independent in simplified_text(result.review_candidates)
+    assert unsupported not in simplified_text(result.review_candidates)
+    assert "P001-L0002" in {unit.id for unit in result.unverified_units}
+    assert "P001-L0003" not in {unit.id for unit in result.unverified_units}
+    payload = json.loads(calls[1]["input"][1]["content"])
+    assert all(unit["page"] == 1 for unit in payload["read_only_context_units"])
+    assert "P001-L0004" not in {unit["id"] for unit in payload["read_only_context_units"]}
+
+
+@pytest.mark.parametrize("allow_partial", [False, True])
+def test_context_values_must_survive_in_the_complete_repair(allow_partial: bool) -> None:
+    source = "기숙사 이용료: 월 12만원\n매월 5일까지 납부"
+    notice = NoticeData(fees=[LabeledFact(
+        text="The dormitory fee is KRW 120,000 per month.", source_evidence=source.splitlines()[0], source_page=1,
+    )])
+    initial = RepairResponse(represented_unit_ids=["P001-L0001"], details=[], decorative=[], unresolved_unit_ids=["P001-L0002"])
+    incomplete = "Pay the dormitory fee by the 5th of each month."
+    retry = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[RepairDetail(
+        unit_ids=["P001-L0002"], context_unit_ids=["P001-L0001"], text=incomplete, category="fee", certain=True,
+    )])
+
+    if not allow_partial:
+        with pytest.raises(CoverageProviderError, match="omitted exact source values"):
+            _run_repair(source, [initial, retry], notice=notice)
+        return
+    result, _ = _run_repair(source, [initial, retry], notice=notice, allow_partial=True)
+
+    assert incomplete not in simplified_text(result.notice)
+    assert result.review_candidates is not None and incomplete not in simplified_text(result.review_candidates)
+    assert {unit.id for unit in result.unverified_units} == {"P001-L0002"}
+
+
+def test_read_only_context_window_does_not_offer_unrelated_distant_or_other_page_units() -> None:
+    from app.services.coverage_repair import _retry_context_units
+
+    source = "[Page 1]\n" + "\n".join(f"자료 {number}" for number in range(1, 9)) + "\n[Page 2]\n다른 공고"
+    units = audit_coverage(NoticeData(), source).units
+    contexts = _retry_context_units(units, {"P001-L0005"}, {"P001-L0003"})
+
+    assert {unit.id for unit in contexts} == {"P001-L0002", "P001-L0004", "P001-L0006", "P001-L0007", "P001-L0008"}
+
+
+@pytest.mark.parametrize("initial_context", [["P001-L9999"], ["P001-L0002"], ["P001-L0002", "P001-L0002"]])
+@pytest.mark.parametrize("allow_partial", [False, True])
+def test_initial_audit_cannot_use_context_without_an_explicit_targeted_offer(initial_context, allow_partial):
+    source = "자료 제출\n공고 확인"
+    bad = "The unoffered context establishes automatic acceptance."
+    initial = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[
+        RepairDetail(unit_ids=["P001-L0001"], context_unit_ids=initial_context,
+                     text=bad, category="application", certain=True),
+        _detail("P001-L0002", "Check the announcement.", "application"),
+    ])
+    correct = "Submit the material."
+    retry = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[],
+                           details=[_detail("P001-L0001", correct, "application")])
+
+    result, calls = _run_repair(source, [initial, retry], allow_partial=allow_partial)
+
+    assert result.requests == len(calls) == 2
+    assert correct in simplified_text(result.notice) and bad not in simplified_text(result.notice)
+    assert "Check the announcement." in simplified_text(result.notice)
+    payload = json.loads(calls[1]["input"][1]["content"])
+    assert [unit["id"] for unit in payload["source_units"]] == ["P001-L0001"]
+    if allow_partial:
+        assert result.review_candidates is not None and bad not in simplified_text(result.review_candidates)
+
+
+@pytest.mark.parametrize("allow_partial", [False, True])
+@pytest.mark.parametrize("retry_text", ["Develop an MVP.", "Develop an MVP (Minimum Viable Product Prototyping)."])
+def test_source_expansion_cannot_restore_an_explicitly_rejected_claim(allow_partial: bool, retry_text: str) -> None:
+    source = "MVP(Minimum Value Prototyping) 소개"
+    rejected = "Develop an MVP (Minimum Value Prototyping)."
+    notice = NoticeData(key_details=[LabeledFact(text=rejected, source_evidence=source, source_page=1)])
+    initial = RepairResponse(represented_unit_ids=["P001-L0001"], details=[], decorative=[],
+                             unresolved_unit_ids=[], unsupported_english_ids=["E001"])
+    retry = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[],
+                           details=[_detail("P001-L0001", retry_text, "topic")])
+
+    if not allow_partial:
+        with pytest.raises(CoverageProviderError, match="reintroduced a previously rejected"):
+            _run_repair(source, [initial, retry], notice=notice)
+        return
+    result, _ = _run_repair(source, [initial, retry], notice=notice, allow_partial=True)
+
+    assert result.has_verification_gaps
+    assert rejected not in simplified_text(result.notice)
+    assert result.review_candidates is not None and rejected not in simplified_text(result.review_candidates)
+
+
+@pytest.mark.parametrize("source,generated,correct", [
+    ("MVP(Minimum Value Prototyping)의 개발", "Develop an MVP (Minimum Viable Product Prototyping).",
+     "Develop an MVP (Minimum Value Prototyping)."),
+    ("HSS(Housing Subsidy Scheme) 신청 가능", "Apply for HSS (Housing Support System).",
+     "Apply for HSS (Housing Subsidy Scheme)."),
+])
+@pytest.mark.parametrize("allow_partial", [False, True])
+def test_complete_attached_expansion_uses_unique_exact_source_quotation(source, generated, correct, allow_partial):
+    initial = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[
+        _detail("P001-L0001", generated, "topic"),
+    ])
+
+    result, calls = _run_repair(source, initial, allow_partial=allow_partial)
+
+    assert result.requests == len(calls) == 1
+    assert result.notice.key_details[0].text == correct
+    assert result.notice.key_details[0].source_evidence == source
+    assert not result.has_verification_gaps
+    if allow_partial:
+        assert result.review_candidates is not None
+        assert result.review_candidates.key_details[0].text == correct
+        assert result.review_candidates.key_details[0].state == ReviewState.NEEDS_REVIEW
+
+
+@pytest.mark.parametrize("allow_partial", [False, True])
+@pytest.mark.parametrize("lines,initial_details,correct", [
+    (["스마트 안경 등 AI Wearable Device", "의 AIX 발굴과 MVP(Minimum Value", "Prototyping)"], [
+        _detail("P001-L0001", "AI Wearable Device, including smart glasses.", "topic"),
+        RepairDetail(unit_ids=["P001-L0002", "P001-L0003"],
+                     text="Explore AIX and create an MVP (Minimum Value Prototyping).", category="topic", certain=True),
+    ], "Explore AIX for AI Wearable Device such as smart glasses and create an MVP (Minimum Value Prototyping)."),
+    (["주민등록등본", "또는 가족관계증명서 제출"], [
+        _detail("P001-L0001", "A resident registration document.", "document"),
+        _detail("P001-L0002", "A family relationship certificate must be submitted.", "document"),
+    ], "Submit a resident registration document or a family relationship certificate."),
+])
+def test_detached_genitive_or_alternative_repairs_include_actual_preceding_source(
+    allow_partial, lines, initial_details, correct,
+) -> None:
+    ids = [f"P001-L{index:04d}" for index in range(1, len(lines) + 1)]
+    initial = RepairResponse(represented_unit_ids=[], details=initial_details, decorative=[], unresolved_unit_ids=[])
+    retry = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[RepairDetail(
+        unit_ids=ids, text=correct, category="topic", certain=True,
+    )])
+
+    result, calls = _run_repair("\n".join(lines), [initial, retry], allow_partial=allow_partial)
+
+    assert result.requests == len(calls) == 2
+    assert correct in simplified_text(result.notice)
+    assert all(detail.text not in simplified_text(result.notice) for detail in initial_details)
+    assert next(item for item in result.notice.key_details if item.text == correct).source_evidence == "\n".join(lines)
+    payload = json.loads(calls[1]["input"][1]["content"])
+    assert [unit["id"] for unit in payload["source_units"]] == ids
+    assert all(unit["requires_full_detail"] for unit in payload["source_units"])
+    if allow_partial:
+        assert result.review_candidates is not None
+        assert correct in simplified_text(result.review_candidates)
+
+
+@pytest.mark.parametrize("connector", ["의", "및", "또는"])
+def test_initial_failure_does_not_forward_a_detached_connector_candidate_to_final_review(connector: str) -> None:
+    source = f"{connector} 가족관계증명서 제출"
+    detached = "A family relationship certificate must be submitted."
+    notice = NoticeData(key_details=[LabeledFact(text=detached, source_evidence=source, source_page=1)])
+
+    result, _ = _run_repair(source, None, notice=notice, allow_partial=True)
+
+    assert detached not in simplified_text(result.notice)
+    assert result.review_candidates is not None and detached not in simplified_text(result.review_candidates)
+
+
+@pytest.mark.parametrize("allow_partial", [False, True])
+def test_complete_grouped_alternative_stays_eligible_regardless_of_provider_id_order(allow_partial: bool) -> None:
+    source = "주민등록등본\n또는 가족관계증명서 제출"
+    correct = "Submit a resident registration document or a family relationship certificate."
+    initial = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[RepairDetail(
+        unit_ids=["P001-L0002", "P001-L0001"], text=correct, category="document", certain=True,
+    )])
+
+    result, calls = _run_repair(source, initial, allow_partial=allow_partial)
+
+    assert result.requests == len(calls) == 1
+    assert correct in simplified_text(result.notice)
+    assert result.notice.key_details[0].source_evidence == source
+
+
+def test_connector_retry_does_not_restore_blocked_preceding_source() -> None:
+    source = "깨진 증명서 이름\n또는 가족관계증명서 제출\n신청서 제출"
+    initial = RepairResponse(represented_unit_ids=[], details=[
+        _detail("P001-L0002", "A family relationship certificate must be submitted.", "document"),
+        _detail("P001-L0003", "Submit the application form.", "application"),
+    ], decorative=[], unresolved_unit_ids=["P001-L0001"])
+    invalid = "Submit the identity document or a family relationship certificate."
+    retry = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[RepairDetail(
+        unit_ids=["P001-L0002"], context_unit_ids=["P001-L0001"], text=invalid, category="document", certain=True,
+    )])
+
+    result, calls = _run_repair(source, [initial, retry], allow_partial=True,
+                              unverified_source_texts=(source.splitlines()[0],))
+
+    assert invalid not in simplified_text(result.notice)
+    assert "Submit the application form." in simplified_text(result.notice)
+    payload = json.loads(calls[1]["input"][1]["content"])
+    assert [unit["id"] for unit in payload["source_units"]] == ["P001-L0002"]
+    assert "P001-L0001" not in {unit["id"] for unit in payload["read_only_context_units"]}
+
+
+@pytest.mark.parametrize("allow_partial", [False, True])
+@pytest.mark.parametrize("lines,first,second,correct", [
+    (["신청 가능: HSS(Housing Subsidy", "Scheme)"],
+     "You may apply for HSS (Housing Subsidy Scheme).", "Scheme",
+     "You may apply for HSS (Housing Subsidy Scheme)."),
+    (["지원 조건에 맞는", "신청 서류를 제출"],
+     "Documents meeting the support criteria will be considered.", "Submit application documents.",
+     "Submit application documents that meet the support criteria."),
+    (["공모 주제에 맞는", "영상 제출"],
+     "Topics related to the contest theme will be considered.", "Submit a video.",
+     "Submit a video that matches the contest theme."),
+])
+def test_open_parenthesis_and_dependent_modifier_repairs_quote_actual_following_line(
+    allow_partial, lines, first, second, correct,
+) -> None:
+    initial = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[
+        _detail("P001-L0001", first, "topic"), _detail("P001-L0002", second, "topic"),
+    ])
+    retry = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[RepairDetail(
+        unit_ids=["P001-L0001", "P001-L0002"], text=correct, category="topic", certain=True,
+    )])
+
+    result, calls = _run_repair("\n".join(lines), [initial, retry], allow_partial=allow_partial)
+
+    assert result.requests == len(calls) == 2
+    assert len(result.notice.key_details) == 1
+    assert result.notice.key_details[0].text == correct
+    assert result.notice.key_details[0].source_evidence == "\n".join(lines)
+    payload = json.loads(calls[1]["input"][1]["content"])
+    assert [unit["id"] for unit in payload["source_units"]] == ["P001-L0001", "P001-L0002"]
+    assert not result.has_verification_gaps
+    if allow_partial:
+        assert result.review_candidates is not None
+        assert result.review_candidates.key_details[0].source_evidence == "\n".join(lines)
+
+
+@pytest.mark.parametrize("source,english", [
+    ("신청 가능: HSS(Housing Subsidy Scheme)", "You may apply for HSS (Housing Subsidy Scheme)."),
+    ("지원 조건에 맞는 신청 서류를 제출", "Submit application documents that meet the support criteria."),
+    ("공모 주제에 맞는 영상 제출", "Submit a video that matches the contest theme."),
+])
+def test_complete_parenthetical_and_modifier_quotations_remain_eligible(source, english):
+    initial = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[],
+                             details=[_detail("P001-L0001", english, "topic")])
+
+    result, calls = _run_repair(source, initial, allow_partial=True)
+
+    assert result.requests == len(calls) == 1
+    assert result.notice.key_details[0].text == english
+    assert result.review_candidates is not None and result.review_candidates.key_details[0].text == english
+    assert result.notice.key_details[0].source_evidence == source
+
+
+def test_balanced_multiline_parenthetical_is_checked_in_source_order() -> None:
+    source = "신청 가능: HSS(Housing Subsidy\nScheme)"
+    correct = "You may apply for HSS (Housing Subsidy Scheme)."
+    initial = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[RepairDetail(
+        unit_ids=["P001-L0002", "P001-L0001"], text=correct, category="application", certain=True,
+    )])
+
+    result, calls = _run_repair(source, initial, allow_partial=True)
+
+    assert result.requests == len(calls) == 1
+    assert result.notice.key_details[0].text == correct
+    assert result.notice.key_details[0].source_evidence == source
+
+
+@pytest.mark.parametrize("source,english", [
+    ("신청 가능: HSS(Housing Subsidy", "You may apply for HSS (Housing Subsidy Scheme)."),
+    ("지원 조건에 맞는", "Documents meeting the support criteria will be considered."),
+])
+def test_incomplete_parenthetical_or_modifier_candidate_is_not_forwarded_after_audit_failure(source, english):
+    notice = NoticeData(key_details=[LabeledFact(text=english, source_evidence=source, source_page=1)])
+
+    result, _ = _run_repair(source, None, notice=notice, allow_partial=True)
+
+    assert english not in simplified_text(result.notice)
+    assert result.review_candidates is not None and english not in simplified_text(result.review_candidates)
+
+
+def test_unfinished_parenthetical_retry_does_not_reconstruct_blocked_completion() -> None:
+    lines = ["신청 가능: HSS(Housing Subsidy", "Scheme)", "신청서 제출"]
+    ungrounded = "You may apply for HSS (Housing Subsidy Scheme)."
+    initial = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[
+        _detail("P001-L0001", ungrounded, "topic"),
+        _detail("P001-L0002", "Scheme", "topic"),
+        _detail("P001-L0003", "Submit the application form.", "application"),
+    ])
+    retry = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[],
+                           details=[_detail("P001-L0001", ungrounded, "topic")])
+
+    result, calls = _run_repair("\n".join(lines), [initial, retry], allow_partial=True,
+                              unverified_source_texts=(lines[1],))
+
+    assert ungrounded not in simplified_text(result.notice)
+    assert "Submit the application form." in simplified_text(result.notice)
+    assert result.review_candidates is not None and ungrounded not in simplified_text(result.review_candidates)
+    payload = json.loads(calls[1]["input"][1]["content"])
+    assert [unit["id"] for unit in payload["source_units"]] == ["P001-L0001"]
+    assert "P001-L0002" not in {unit["id"] for unit in payload["read_only_context_units"]}
+
+
+def test_balanced_group_with_missing_line_metadata_uses_authoritative_source_order() -> None:
+    from app.services.coverage import CoverageUnit
+    from app.services.coverage_repair import _validate_response
+
+    units = [
+        CoverageUnit(id="P001-L0001", page=1, text="신청 가능: HSS(Housing Subsidy"),
+        CoverageUnit(id="P001-L0002", page=1, text="Scheme)"),
+    ]
+    correct = "You may apply for HSS (Housing Subsidy Scheme)."
+    response = RepairResponse(represented_unit_ids=[], decorative=[], unresolved_unit_ids=[], details=[RepairDetail(
+        unit_ids=["P001-L0002", "P001-L0001"], text=correct, category="application", certain=True,
+    )])
+
+    validated, decorative = _validate_response(response, units, set(), {unit.id: [] for unit in units})
+
+    assert decorative == 0
+    assert len(validated) == 1
+    assert [unit.id for unit in validated[0][1]] == ["P001-L0001", "P001-L0002"]
+    assert "\n".join(unit.text for unit in validated[0][1]) == "신청 가능: HSS(Housing Subsidy\nScheme)"

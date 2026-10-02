@@ -25,7 +25,8 @@ source unit; removing an unsupported claim does not license skipping source text
 The same audit checks displayed English claims, including summaries and review
 notes. It can reject a model-invented consequence even when its quoted Korean
 exists; affected source units then require complete grounded details.
-Local wording correction uses evidence-backed glossary terms only; it does not replace
+Local wording correction uses evidence-backed glossary terms and explicitly printed
+acronym expansions from each field's quotation; it does not replace
 whole sentences with translations of a remembered poster. Missing clauses must pass
 the independent semantic audit. Invalid audit assignments are removed before a
 focused retry; grouped facts are retried together, unknown IDs require broader review,
@@ -161,7 +162,12 @@ in the English digest as an unmapped-line substitute.
 Photo extraction uses a compact schema: exact quoted evidence remains model output,
 while fact IDs are assigned locally. Identical quotes on the same page share IDs,
 preserving separate document checklist items. The MyMemory baseline is displayed
-separately and is omitted from photo semantic prompts. The final support check
+separately and is omitted from photo semantic prompts. In non-mock photo mode,
+baseline translation and Korean-source extraction run concurrently. Their measured
+durations are independent; the pipeline wall time does not add the overlap twice.
+Unexpected stage errors cancel and join the sibling request. Strict text/document
+and mock processing still forwards the completed translation to extraction.
+The final support check
 classifies the actual final English after all repairs, without writing replacements.
 Provider-generated review prose is replaced by application-owned English gaps.
 Unassociated table cells and short generic captions are withheld; this conservative
@@ -196,3 +202,10 @@ English field and source unit, preventing omissions and duplicate IDs in a valid
 structured response. This changes response bookkeeping, not the model or its
 evidence criteria. The existing three-list response remains the contract when
 the independent verifier is called without source units.
+
+Targeted repairs always require complete details. Photo retries receive nearby,
+same-page, unblocked source units as read-only context, allowing a continuation to
+quote its heading without counting that heading as another repaired target.
+Target assignments remain exactly once; context IDs are validated separately and
+their exact text is included in the final review's quotation. Context does not
+establish semantic correctness or allow a dependent claim to bypass review.

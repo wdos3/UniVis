@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 import httpx
 import pytest
 
 from app.models import Action, Contact, DocumentRequirement, LabeledFact, NoticeData, ReviewState, SourceFact
+from app.services import pipeline
 from app.services.pipeline import analyze_text_pipeline
-from app.services.semantic import SemanticResult, normalize_notice
-from app.services.translation import MyMemoryTranslationProvider, TranslationResult, split_utf8_chunks
+from app.services.semantic import SemanticError, SemanticResult, normalize_notice
+from app.services.translation import MyMemoryTranslationProvider, TranslationError, TranslationResult, split_utf8_chunks
 
 
 def test_translation_chunks_stay_within_mymemory_byte_limit() -> None:
@@ -137,3 +139,188 @@ def test_semantic_cleanup_flags_untranslated_user_facing_text() -> None:
 
     assert normalized.eligibility[0].state == ReviewState.NEEDS_REVIEW
     assert "remain in Korean" in normalized.unverified_items[0]
+
+
+def test_partial_photo_stages_overlap_with_independent_timing_and_usage(monkeypatch):
+    clock = SimpleNamespace(now=0.0)
+    semantic_started = asyncio.Event()
+    translation_finished = asyncio.Event()
+    calls = []
+
+    async def translate(text, source_language, target_language):
+        calls.append("translation")
+        assert (text, source_language, target_language) == ("신청 안내", "ko", "en")
+        await semantic_started.wait()
+        clock.now = 0.010
+        translation_finished.set()
+        return TranslationResult("Independent baseline", "test-translation", 3)
+
+    async def analyze(source, baseline, target, **kwargs):
+        calls.append("semantic")
+        assert (source, baseline, target) == ("신청 안내", "", "en")
+        assert kwargs == {"layout_context": "positioned source", "allow_partial": True}
+        semantic_started.set()
+        await translation_finished.wait()
+        clock.now = 0.030
+        return SemanticResult(NoticeData(title="Application notice"), "test-semantic", 2, 120, 80, 200,
+                              extraction_latency_ms=22, english_repair_latency_ms=8)
+
+    monkeypatch.setattr(pipeline, "perf_counter", lambda: clock.now)
+    monkeypatch.setattr(pipeline, "choose_translation_provider", lambda mock=False: SimpleNamespace(translate=translate))
+    monkeypatch.setattr(pipeline, "choose_semantic_provider", lambda provider: SimpleNamespace(name="openai-semantic", analyze=analyze))
+
+    async def exercise():
+        return await asyncio.wait_for(analyze_text_pipeline(
+            "신청 안내", "en", "openai", allow_partial=True, layout_context="positioned source",
+        ), timeout=0.5)
+
+    result = asyncio.run(exercise())
+    assert sorted(calls) == ["semantic", "translation"]
+    assert result.translation == "Independent baseline"
+    assert (result.translation_latency_ms, result.semantic_latency_ms, result.total_latency_ms) == (10, 30, 30)
+    assert result.total_latency_ms < result.translation_latency_ms + result.semantic_latency_ms
+    assert (result.extraction_latency_ms, result.english_repair_latency_ms) == (22, 8)
+    assert result.translation_requests == 3 and result.semantic_requests == 2
+    assert (result.semantic_input_tokens, result.semantic_output_tokens, result.semantic_total_tokens) == (120, 80, 200)
+    assert result.metrics_complete and result.warnings == []
+
+
+@pytest.mark.parametrize("semantic_name,allow_partial", [
+    ("openai-semantic", False), ("mock-semantic", False), ("mock-semantic", True),
+])
+def test_strict_and_mock_stages_keep_translation_dependency(monkeypatch, semantic_name, allow_partial):
+    clock = SimpleNamespace(now=0.0)
+    events = []
+
+    async def translate(*args):
+        events.append("translation started")
+        await asyncio.sleep(0)
+        clock.now = 0.015
+        events.append("translation completed")
+        return TranslationResult("Forward this baseline", "test-translation", 2)
+
+    async def analyze(source, baseline, target, **kwargs):
+        assert events == ["translation started", "translation completed"]
+        assert baseline == "Forward this baseline"
+        assert kwargs == {"layout_context": ""} | ({"allow_partial": True} if allow_partial else {})
+        events.append("semantic started")
+        clock.now = 0.050
+        return SemanticResult(NoticeData(title="Notice"), semantic_name, 1)
+
+    def choose_translation(mock=False):
+        assert mock is (semantic_name == "mock-semantic")
+        return SimpleNamespace(translate=translate)
+
+    monkeypatch.setattr(pipeline, "perf_counter", lambda: clock.now)
+    monkeypatch.setattr(pipeline, "choose_translation_provider", choose_translation)
+    monkeypatch.setattr(pipeline, "choose_semantic_provider", lambda provider: SimpleNamespace(name=semantic_name, analyze=analyze))
+    result = asyncio.run(analyze_text_pipeline("신청 안내", "en", "auto", allow_partial=allow_partial))
+    assert events[-1] == "semantic started"
+    assert (result.translation_latency_ms, result.semantic_latency_ms, result.total_latency_ms) == (15, 35, 50)
+    assert result.translation == "Forward this baseline" and result.translation_requests == 2
+
+
+def test_parallel_translation_outage_preserves_source_semantics_and_incomplete_metrics(monkeypatch):
+    clock = SimpleNamespace(now=0.0)
+    semantic_started = asyncio.Event()
+    translation_finished = asyncio.Event()
+
+    async def translate(*args):
+        await semantic_started.wait()
+        clock.now = 0.012
+        translation_finished.set()
+        raise TranslationError("Quota exhausted")
+
+    async def analyze(source, baseline, target, **kwargs):
+        assert baseline == "" and kwargs["allow_partial"] is True
+        semantic_started.set()
+        await translation_finished.wait()
+        clock.now = 0.020
+        return SemanticResult(NoticeData(title="Source-interpreted notice"), "test-semantic", 1, 40, 10, 50,
+                              warnings=["Independent semantic warning"])
+
+    monkeypatch.setattr(pipeline, "perf_counter", lambda: clock.now)
+    monkeypatch.setattr(pipeline, "choose_translation_provider", lambda mock=False: SimpleNamespace(translate=translate))
+    monkeypatch.setattr(pipeline, "choose_semantic_provider", lambda provider: SimpleNamespace(name="openai-semantic", analyze=analyze))
+
+    async def exercise():
+        return await asyncio.wait_for(analyze_text_pipeline("신청 안내", "en", "openai", allow_partial=True), timeout=0.5)
+
+    result = asyncio.run(exercise())
+    assert result.notice.title == "Source-interpreted notice"
+    assert result.translation == "" and result.translation_provider == "unavailable"
+    assert result.translation_requests == 0 and result.semantic_requests == 1
+    assert (result.semantic_input_tokens, result.semantic_output_tokens, result.semantic_total_tokens) == (40, 10, 50)
+    assert (result.translation_latency_ms, result.semantic_latency_ms, result.total_latency_ms) == (12, 20, 20)
+    assert result.metrics_complete is False
+    assert "temporary translation service was unavailable" in result.warnings[0]
+    assert result.warnings[1] == "Independent semantic warning"
+
+
+@pytest.mark.parametrize("failing_stage", ["translation", "semantic"])
+def test_parallel_fatal_stage_error_cancels_and_awaits_sibling_cleanup(monkeypatch, failing_stage):
+    started = {stage: asyncio.Event() for stage in ("translation", "semantic")}
+    cleanup_finished = asyncio.Event()
+    original = RuntimeError("Unexpected translation failure") if failing_stage == "translation" else SemanticError("Invalid semantic response")
+
+    async def stage(name):
+        started[name].set()
+        await started["semantic" if name == "translation" else "translation"].wait()
+        if name == failing_stage:
+            raise original
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            cleanup_finished.set()
+
+    async def translate(*args):
+        return await stage("translation")
+
+    async def analyze(*args, **kwargs):
+        return await stage("semantic")
+
+    monkeypatch.setattr(pipeline, "choose_translation_provider", lambda mock=False: SimpleNamespace(translate=translate))
+    monkeypatch.setattr(pipeline, "choose_semantic_provider", lambda provider: SimpleNamespace(name="openai-semantic", analyze=analyze))
+
+    async def exercise():
+        with pytest.raises(type(original)) as caught:
+            await asyncio.wait_for(analyze_text_pipeline("신청 안내", "en", "openai", allow_partial=True), timeout=0.5)
+        assert caught.value is original
+        assert cleanup_finished.is_set()
+        assert [task for task in asyncio.all_tasks() if task is not asyncio.current_task()] == []
+
+    asyncio.run(exercise())
+
+
+def test_caller_cancellation_awaits_both_independent_stages(monkeypatch):
+    started = {stage: asyncio.Event() for stage in ("translation", "semantic")}
+    cleaned = set()
+
+    async def stage(name):
+        started[name].set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            cleaned.add(name)
+
+    async def translate(*args):
+        return await stage("translation")
+
+    async def analyze(*args, **kwargs):
+        return await stage("semantic")
+
+    monkeypatch.setattr(pipeline, "choose_translation_provider", lambda mock=False: SimpleNamespace(translate=translate))
+    monkeypatch.setattr(pipeline, "choose_semantic_provider", lambda provider: SimpleNamespace(name="openai-semantic", analyze=analyze))
+
+    async def exercise():
+        task = asyncio.create_task(analyze_text_pipeline("신청 안내", "en", "openai", allow_partial=True))
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started.values())), timeout=0.5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert cleaned == {"translation", "semantic"}
+        assert [pending for pending in asyncio.all_tasks() if pending is not asyncio.current_task()] == []
+
+    asyncio.run(exercise())
