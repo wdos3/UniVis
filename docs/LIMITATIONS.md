@@ -8,6 +8,16 @@ OCR can corrupt Korean text, a free translator can mistranslate administrative l
 
 The fidelity percentage detects missing and unknown references among facts the model identified. It cannot see facts missing from the model's inventory. A separate check compares recovered OCR lines with the English display fields that cite them; it can add grounded English details, or fail the analysis rather than publish a digest when the source remains unresolved. It cannot prove that the English meaning is correct, detect text that OCR never recovered, or make an ambiguous table pairing reliable. A wrong paraphrase can still cite the right source line. Page links and optional bounding boxes improve auditability but do not establish semantic correctness. Raw unmapped OCR lines are not presented as a substitute for a digest.
 
+Photo final review separately classifies English-field support and complete
+source-unit meaning. Only surviving supported wording can establish coverage;
+exact citations and collective literal/condition checks are also required.
+Grounded candidates may be recovered from an earlier audit failure, but a
+source-completeness judgment remains another fallible model result. Locally
+withheld checklists and incorrect date/amount candidates are excluded before
+review. Pipe-delimited notice contacts are parsed independently of neighboring
+phone numbers. None of these checks establishes that every source word was
+detected or interpreted correctly.
+
 ## Administrative and legal language
 
 Visa, employment, tuition, and academic-status notices may have legal effects. The prototype must not replace official guidance, university staff, or immigration authorities.

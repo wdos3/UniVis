@@ -20,6 +20,36 @@ If no instructions can be verified, the result is an English unavailable state.
 Users do not have to type Korean. Strict text/document API defaults remain strict.
 Neither a partial result nor an automated audit establishes semantic perfection.
 
+## Final-review recovery follow-through, Oct 2
+
+Further real-photo diagnostics showed that a malformed targeted coverage reply
+was discarding independent readable repairs before final review. The safe
+standalone coverage result remains conservative; its separate internal candidate
+notice is passed only to mandatory final English review. Known rejected meanings,
+blocked source quotations, invented evidence and invalid grouped assignments
+remain excluded. Partial targeted retries quarantine invalid assignments while
+retaining independent valid ones for review. Strict text/document behavior is
+unchanged.
+
+Final review now certifies both each English claim and the complete meaning of
+each recovered source unit. Local checklist/role changes and deterministic
+contradiction guards precede the call. A supported partial clause is insufficient
+for complete source coverage; final status comes from surviving supported wording,
+its exact citations, and collective literal/condition/spending checks. A complete
+supported replacement can clear an earlier gap. Source units use required keyed
+enum verdicts in the structured response: the diagnostic list-based response
+omitted one English ID and nine source IDs and classified two source IDs twice.
+The new schema eliminates those bookkeeping failures in valid parsed responses;
+it does not establish semantic correctness by itself.
+
+The redundant global partial-result warning banner was removed. Concrete source
+gaps, the partial status and optional retained-OCR retry remain visible. No
+unreadable content is relabeled verified. Pipe-delimited phone/email contact
+parsing was fixed generically, preserving readable addresses and internal address
+punctuation. Directly conflicting explicit dates are withheld before model review;
+valid individual range endpoints remain eligible, and software decimals are not
+treated as calendar dates.
+
 ## Corpus and evidence
 
 Five original photographs were supplied in
@@ -137,12 +167,21 @@ the failed references are not successes or OCR measurements.
 
 ### Automated checks and reviewed fixes
 
-Final backend checks: `python -m pytest backend/tests -q` **560 passed**;
+Final backend checks: `python -m pytest backend/tests -q` **688 passed**;
 `ruff check backend/app backend/tests` passed. Six dependency deprecation warnings
 remain. Frontend: `npm run test` **75 passed in nine files**, `npm run lint`,
 and `npm run build` (TypeScript, Vite, V1 asset aliases) passed. `git diff --check`
 passed. A second agent independently reviewed final behavior, partition recovery,
 source roles, retry ownership, photo privacy and unchanged packaging.
+
+Additional regressions cover selective quarantine of malformed targeted replies,
+internal-only candidate recovery, whole-source-unit coverage, required keyed
+verdict schemas, directly conflicting dates versus legitimate range endpoints,
+calendar/version disambiguation, shared-quotation literal coverage, contact pipe
+separators, and removal of the redundant partial-result banner. The semantic
+prompt also requires coherent continuation relationships and complete enumerated
+options; its effectiveness is checked through actual runs rather than assumed
+from the wording.
 
 Tests distinguish a reviewed contextual weekly schedule from a detached weekday,
 ordinary identity-document submission from an unquoted application checklist,

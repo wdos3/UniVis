@@ -7,7 +7,7 @@ import pytest
 
 from app.models import Deadline, LabeledFact, NoticeData
 from app.services.coverage_repair import CoverageProviderError, RepairDetail, RepairResponse, repair_coverage
-from app.services.english_literals import missing_english_literals, missing_source_conditions, missing_source_values, missing_spending_rules, unsupported_currency_amounts
+from app.services.english_literals import missing_english_literals, missing_source_conditions, missing_source_values, missing_spending_rules, unsupported_currency_amounts, unsupported_source_dates
 from app.services.text import simplified_text
 
 
@@ -32,6 +32,109 @@ def test_amount_elsewhere_cannot_be_invented_from_a_heading_quote(english):
 def test_quoted_currency_amount_preserves_decimal_and_large_korean_units():
     assert unsupported_currency_amounts("예산 1.5억원", "Budget: KRW 150,000,000.") == []
     assert unsupported_currency_amounts("지원금 KRW 20,000", "Funding: 20,000 won.") == []
+
+
+@pytest.mark.parametrize(("english", "expected"), [
+    ("Deadline: 2029-10-15.", ["2029-10-15"]),
+    ("Applications close October 15, 2029 at 18:00.", ["2029-10-15"]),
+    ("Apply by 15th of October 2029.", ["2029-10-15"]),
+    ("Applications close October 17, 2028.", ["2028-10-17"]),
+    ("Deadline: 10/15.", ["10-15"]),
+    ("Deadline: 2029-10-17 at 18:00.", []),
+    ("Applications close Oct. 17, 2029 at 18:00.", []),
+    ("Applications close 17 October 2029 at 18:00.", []),
+    ("Apply by October 17.", []),
+    ("Application instructions are provided below.", []),
+])
+def test_explicit_english_calendar_dates_must_match_the_field_quote(english, expected):
+    assert unsupported_source_dates("접수 마감: 2029.10.17 18:00", english) == expected
+
+
+@pytest.mark.parametrize("english", [
+    "Applications open on November 3, 2029.",
+    "Applications close on November 28, 2029.",
+    "Opening date: 2029-11-03.",
+    "Closing date: 2029-11-28.",
+    "Apply November 3 through November 28, 2029.",
+])
+def test_valid_single_range_endpoint_is_not_a_date_contradiction(english):
+    assert unsupported_source_dates("접수기간: 2029.11.03(토)~11.28(수)18:00", english) == []
+
+
+@pytest.mark.parametrize("source", ["접수 마감: 10.17", "10.17(수)", "10월 17일 마감"])
+def test_abbreviated_source_date_allows_an_english_year_from_context(source):
+    assert unsupported_source_dates(source, "Applications close October 17, 2029.") == []
+    assert unsupported_source_dates(source, "Applications close Oct. 15, 2029.") == ["2029-10-15"]
+
+
+@pytest.mark.parametrize("source", [
+    "Deadline: October 17, 2029.", "Deadline: 2029-10/17.", "Deadline: 2029/10/17.",
+])
+def test_calendar_context_cannot_weaken_an_explicit_source_year(source):
+    assert unsupported_source_dates(source, "Deadline: October 17, 2028.") == ["2028-10-17"]
+    assert unsupported_source_dates(source, "Deadline: October 17, 2029.") == []
+
+
+@pytest.mark.parametrize("source", [
+    "접수 마감 2029.10.17\nPython 3.12 지원",
+    "접수 마감 2029.10.17 Python 3.12 지원",
+    "Python 3.12 지원; 접수 마감 2029.10.17",
+])
+@pytest.mark.parametrize("english", [
+    "Deadline: October 17, 2029. Python 3.12 is supported.",
+    "Python 3.12 is supported; deadline: October 17, 2029.",
+    "Deadline: 10/17. Python versions 3.12 through 3.13 are supported.",
+])
+def test_calendar_context_does_not_spread_to_software_decimals(source, english):
+    assert unsupported_source_dates(source, english) == []
+
+
+@pytest.mark.parametrize("source", [
+    "접수 마감 2029.10.17 Python 3.12 지원",
+    "면접 10.17(수) Python 3.12 지원",
+])
+def test_software_decimal_near_a_source_date_cannot_support_a_changed_deadline(source):
+    assert unsupported_source_dates(source, "Deadline: March 12, 2029.") == ["2029-03-12"]
+    assert unsupported_source_dates(source, "Deadline: 3/12.") == ["03-12"]
+
+
+@pytest.mark.parametrize(("source", "english"), [
+    ("접수 마감 2029.10.17 Python 3.12 지원", "Deadline: October 17, 2029. Python 3.12 is supported."),
+    ("면접 10.17(수) Python 3.12 지원", "Interview: October 17. Python 3.12 is supported."),
+    ("3.02~3.24(화) Python 3.12 지원", "March 2 through March 24. Python 3.12 is supported."),
+    ("접수기간 2029.10.17~10.20 Python 3.12 지원", "Applications: October 17 through October 20, 2029."),
+])
+def test_source_value_guard_does_not_require_software_decimals_as_extra_dates(source, english):
+    assert missing_source_values(source, english) == []
+
+
+@pytest.mark.parametrize("english", [
+    "Dates: 10/17 through 10/20. Python 3.12 is supported.",
+    "Date range: 2029-10-17~10/20. Python 3.12 is supported.",
+    "October 17, 2029–10/20. Python 3.12 is supported.",
+    "Dates: 10/17-10/20. Python 3.12 is supported.",
+])
+def test_explicit_range_links_preserve_abbreviated_endpoints_with_other_decimal_values(english):
+    source = "접수기간 2029.10.17~2029.10.20 Python 3.12 지원"
+    assert unsupported_source_dates(source, english) == []
+    assert unsupported_source_dates(source, english.replace("10/20", "10/21")) == ["10-21"]
+
+
+@pytest.mark.parametrize("english", ["September 20, 2029.", "Sep. 20, 2029.", "Sept. 20, 2029."])
+def test_spelled_month_and_its_common_abbreviations_are_equivalent(english):
+    assert unsupported_source_dates("2029년 9월 20일 신청 마감", english) == []
+
+
+@pytest.mark.parametrize(("source", "english"), [
+    ("제품 가격: 3.20만원", "The product costs KRW 32,000 on October 15, 2029."),
+    ("프로그램 버전 3.20~3.25", "Release date: March 22."),
+    ("연구 값 9.30", "Results published September 29, 2029."),
+    ("신청 마감", "Deadline: 2029-10-15."),
+    ("2029.10.17 신청 마감", "Software version 3.20 is supported."),
+    ("2029.10.17 신청 마감", "Applicants must obtain a rating of 3.20."),
+])
+def test_date_contradiction_guard_requires_actual_calendar_evidence(source, english):
+    assert unsupported_source_dates(source, english) == []
 
 
 @pytest.mark.parametrize("wording", ["receiving research supervision", "receiving research guidance"])

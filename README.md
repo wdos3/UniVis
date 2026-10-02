@@ -6,7 +6,7 @@ Version 2 separates the notice pipeline into three replaceable portions:
 2. MyMemory provides temporary no-key translation (or a configured LibreTranslate instance can replace it);
 3. OpenAI extracts typed notice facts from the Korean source and translation, then checks the English output for omitted source details. React renders the result deterministically.
 
-An analysis can make several OpenAI calls: initial structured extraction, English-field repair when needed, a source-line completeness audit, possibly a targeted audit retry, and a bounded final English support check for photos. Photo extraction assigns fact IDs locally from exact quotations and interprets Korean directly; MyMemory remains a separate baseline. The response records stage timings, request counts, and available token usage. Version 1 remains unchanged in `../visnotice` apart from its explicit Version 1 branding.
+An analysis can make several OpenAI calls: initial structured extraction, English-field repair when needed, a source-line completeness audit, possibly a targeted audit retry, and a bounded final English support check for photos. Photo extraction assigns fact IDs locally from exact quotations and interprets Korean directly; MyMemory remains a separate baseline. Grounded photo candidates are retained internally for final review even when an earlier audit cannot certify them. The review checks each English claim and the complete meaning of each recovered source unit; uncertain candidates are withheld. The response records stage timings, request counts, and available token usage. Version 1 remains unchanged in `../visnotice` apart from its explicit Version 1 branding.
 
 **Visualizing Korean University Notices for International Students**
 

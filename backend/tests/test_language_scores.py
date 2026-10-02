@@ -429,7 +429,7 @@ def test_photo_keeps_independent_table_pairs_after_an_unresolved_semantic_audit(
             notice.eligibility.append(LabeledFact(
                 text="The table does not apply to this hiring round.", source_evidence=non_applicability,
             ))
-        return EnglishNoticeReview(notice=notice)
+        return EnglishNoticeReview(notice=notice, has_verification_gaps=True, unverified_source_units=1)
 
     monkeypatch.setattr(main, "_run_text_pipeline", extracted)
     monkeypatch.setattr(main, "repair_coverage", audit)

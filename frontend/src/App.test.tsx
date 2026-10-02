@@ -156,8 +156,9 @@ describe('App browser OCR', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
 
     expect(await screen.findByText(/Partial interpretation/)).toBeInTheDocument()
-    expect(screen.getByText('Some details could not be verified.')).toBeInTheDocument()
-    expect(screen.getByText(/2 source line\(s\) remain unverified/)).toHaveTextContent('You do not need to type Korean.')
+    expect(screen.queryByText('Some details could not be verified.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Automatic source review')).not.toBeInTheDocument()
+    expect(screen.getByText(/You do not need to type Korean/)).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: /Simplified Text/ })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tabpanel')).toHaveTextContent(supportedFact)
     expect(screen.getByRole('tabpanel')).toHaveTextContent('Verification gaps')
@@ -178,7 +179,7 @@ describe('App browser OCR', () => {
       ...imageResult,
       provider: 'openai',
       notice: { ...notice, title: 'English interpretation needs verification' },
-      simplified_text: 'Some details could not be verified. Retry the English interpretation or upload a clearer photo.',
+      simplified_text: 'A source section awaits a complete reading. Retry the English interpretation or upload a clearer photo.',
       acquisition: { ...imageResult.acquisition, english_coverage_status: 'partial', unverified_source_units: 1 },
     }
     vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: true, default_provider: 'openai', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })

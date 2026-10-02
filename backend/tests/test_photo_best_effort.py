@@ -8,7 +8,6 @@ import pytest
 from app import main
 from app.models import Contact, LabeledFact, NoticeData, SourceFact
 from app.services import pipeline
-from app.services.english_review import EnglishNoticeReview
 from app.services.pipeline import PipelineResult
 from app.services.coverage_repair import RepairResponse, repair_coverage
 from app.services.semantic import OpenAISemanticProvider, SemanticResult, SourceCorrectionRequired
@@ -61,12 +60,19 @@ def test_damaged_photo_contact_is_withheld_without_blocking_other_audited_facts(
         return await repair_coverage(*args, client=SimpleNamespace(responses=responses), **kwargs)
 
     monkeypatch.setattr(main, "repair_coverage", audit)
-    async def final_review(notice, source_text, **kwargs):
-        assert notice.contacts == []
-        assert notice.key_details[0].text == "Student event recruitment."
-        return EnglishNoticeReview(notice=notice)
+    from app.services import english_review
+    from app.services.english_verification import EnglishSupportDecision, EnglishSupportResult
 
-    monkeypatch.setattr(main, "review_notice_english", final_review)
+    async def final_review(fields, source_text, **kwargs):
+        assert all(field.field != "contacts" for field in fields)
+        assert any(field.text == "Student event recruitment." for field in fields)
+        return EnglishSupportResult(
+            decisions=tuple(EnglishSupportDecision(id=field.id, status="supported", reason="") for field in fields),
+            requests=1, fully_covered_source_ids=frozenset({"P001-L0001"}),
+            unverified_source_ids=frozenset({"P001-L0002"}),
+        )
+
+    monkeypatch.setattr(english_review, "verify_english_support", final_review)
     response = client.post("/api/analyze-client-ocr", json={
         "pages": [{"text": source}], "ocr_latency_ms": 100, "provider": "openai", "allow_partial": True,
     })

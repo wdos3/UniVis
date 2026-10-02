@@ -28,7 +28,10 @@ _SOURCE_MONTH_DAY = re.compile(r"(?<!\d)(0?[1-9]|1[0-2])\s*월\s*(0?[1-9]|[12]\d
 _ABBREVIATED_MONTH_DAY = re.compile(
     r"(?<![\d./])(0?[1-9]|1[0-2])\s*[./]\s*(0?[1-9]|[12]\d|3[01])(?![\d./])"
 )
-_SOURCE_WEEKDAY = re.compile(r"\(\s*[월화수목금토일]\s*\)")
+_CALENDAR_WEEKDAY = re.compile(
+    r"\s*\(\s*(?:[월화수목금토일]|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*\)",
+    re.IGNORECASE,
+)
 _DATE_LABEL = re.compile(
     r"(?:신청|접수|모집|등록|납부|행사)?\s*(?:기간|일시|일자|날짜|마감|일정|기한)\s*[:：|]?\s*$"
 )
@@ -44,6 +47,35 @@ _SOURCE_TITLE_TERM = re.compile(r"(?<![A-Za-z])(?:[A-Z][a-z]{2,}\s+)+[A-Z][a-z]{
 _MONTH_NAMES = (
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
+)
+_MONTH_NUMBERS = {
+    spelling: number
+    for number, name in enumerate(_MONTH_NAMES, start=1)
+    for spelling in (name, name[:3], *(("sept",) if number == 9 else ()))
+}
+_ENGLISH_MONTH = "|".join(sorted(_MONTH_NUMBERS, key=len, reverse=True))
+_ENGLISH_NAMED_DATE = re.compile(
+    rf"\b({_ENGLISH_MONTH})\.?\s+(0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?"
+    r"(?:\s*,?\s*(20\d{2}))?(?!\d)", re.IGNORECASE,
+)
+_ENGLISH_DAY_MONTH = re.compile(
+    rf"(?<!\d)(0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s+(?:of\s+)?"
+    rf"({_ENGLISH_MONTH})\.?(?:\s*,?\s*(20\d{{2}}))?\b", re.IGNORECASE,
+)
+_ENGLISH_DATE_LABEL = re.compile(
+    r"\b(?:dates?|deadlines?|period|schedule|opens?|closes?|starts?|ends?|due)"
+    r"(?:\s+(?:is|are|on|from|at|by|between))?\s*[:：|]?\s*$"
+    r"|\b(?:apply|applications?|register|registration)\s+(?:by|until|from|on)\s*$",
+    re.IGNORECASE,
+)
+_ENGLISH_NUMERIC_MONTH_DAY = re.compile(
+    r"(?<![\d./])(0?[1-9]|1[0-2])\s*[./]\s*(0?[1-9]|[12]\d|3[01])(?!\d|[./]\d)"
+)
+_DATE_CONTEXT_SUFFIX = re.compile(
+    r"\s*(?:is\s+(?:the\s+)?)?(?:deadline|date|마감|일시|일자|기한)\b", re.IGNORECASE,
+)
+_DATE_RANGE_LINK = re.compile(
+    rf"(?:{_CALENDAR_WEEKDAY.pattern})?\s*(?:[~～–—-]|to|through|until)\s*", re.IGNORECASE,
 )
 _SOURCE_INSTALLMENT = re.compile(
     r"(?P<number>[1-9]\d*)\s*(?:회\s*차|차|번째)\s*"
@@ -215,6 +247,43 @@ def _has_latin_term(term: str, display_words: set[str]) -> bool:
     return word in display_words or f"{word}s" in display_words or f"{word}es" in display_words
 
 
+def _contextual_month_days(
+    text: str, date_pattern: re.Pattern[str], label_pattern: re.Pattern[str],
+) -> set[tuple[None, int, int]]:
+    """A decimal needs its own calendar cue or a direct link to a dated endpoint."""
+    dates: set[tuple[None, int, int]] = set()
+    for line in text.splitlines():
+        pending = list(date_pattern.finditer(line))
+        anchors = [
+            (match.start(), match.end())
+            for pattern in (_SOURCE_DATE, _SOURCE_MONTH_DAY, _ENGLISH_NAMED_DATE, _ENGLISH_DAY_MONTH)
+            for match in pattern.finditer(line)
+        ]
+        bare_range = bool(_BARE_DATE_RANGE.fullmatch(line))
+        # A cue at the final endpoint can establish the preceding range too.
+        while pending:
+            remaining = []
+            for match in pending:
+                linked = any(
+                    (end <= match.start() and _DATE_RANGE_LINK.fullmatch(line[end:match.start()]))
+                    or (match.end() <= start and _DATE_RANGE_LINK.fullmatch(line[match.end():start]))
+                    for start, end in anchors
+                )
+                if (
+                    bare_range or linked or label_pattern.search(line[:match.start()])
+                    or _CALENDAR_WEEKDAY.match(line[match.end():])
+                    or _DATE_CONTEXT_SUFFIX.match(line[match.end():])
+                ):
+                    dates.add((None, int(match[1]), int(match[2])))
+                    anchors.append((match.start(), match.end()))
+                else:
+                    remaining.append(match)
+            if len(remaining) == len(pending):
+                break
+            pending = remaining
+    return dates
+
+
 def _abbreviated_source_dates(source_text: str) -> set[tuple[None, int, int]]:
     """Recognize calendar context without treating every decimal as a date.
 
@@ -223,16 +292,52 @@ def _abbreviated_source_dates(source_text: str) -> set[tuple[None, int, int]]:
     range cannot establish a year. Weekdays and adjacent date labels also make
     an abbreviated date distinguishable from prices or software versions.
     """
-    dates: set[tuple[None, int, int]] = set()
-    for line in source_text.splitlines():
-        calendar_line = bool(
-            _SOURCE_DATE.search(line) or _SOURCE_WEEKDAY.search(line)
-            or _BARE_DATE_RANGE.fullmatch(line)
+    return _contextual_month_days(source_text, _ABBREVIATED_MONTH_DAY, _DATE_LABEL)
+
+
+def _source_calendar_dates(source_text: str) -> set[tuple[int | None, int, int]]:
+    dates = {(int(year), int(month), int(day)) for year, month, day in _SOURCE_DATE.findall(source_text)}
+    dates.update((None, int(month), int(day)) for month, day in _SOURCE_MONTH_DAY.findall(source_text))
+    dates.update(_abbreviated_source_dates(source_text))
+    return {
+        value for value in dates
+        if value[0] is not None or not any(
+            year is not None and (month, day) == value[1:]
+            for year, month, day in dates
         )
-        for match in _ABBREVIATED_MONTH_DAY.finditer(line):
-            if calendar_line or _DATE_LABEL.search(line[:match.start()]):
-                dates.add((None, int(match[1]), int(match[2])))
-    return dates
+    }
+
+
+def _explicit_calendar_dates(text: str) -> set[tuple[int | None, int, int]]:
+    dates = _source_calendar_dates(text)
+    for month, day, year in _ENGLISH_NAMED_DATE.findall(text):
+        dates.add((int(year) if year else None, _MONTH_NUMBERS[month.casefold()], int(day)))
+    for day, month, year in _ENGLISH_DAY_MONTH.findall(text):
+        dates.add((int(year) if year else None, _MONTH_NUMBERS[month.casefold()], int(day)))
+    dates.update(_contextual_month_days(text, _ENGLISH_NUMERIC_MONTH_DAY, _ENGLISH_DATE_LABEL))
+    dated_month_days = {(month, day) for year, month, day in dates if year is not None}
+    return {value for value in dates if value[0] is not None or value[1:] not in dated_month_days}
+
+
+def unsupported_source_dates(source_evidence: str, english_text: str) -> list[str]:
+    """Find explicit English dates that conflict with this field's calendar evidence.
+
+    A valid endpoint may represent only part of a quoted range. Missing dates
+    are a completeness concern, not a contradiction. An abbreviated source
+    date cannot establish a year, which may legitimately come from context.
+    """
+    source_dates = _explicit_calendar_dates(source_evidence)
+    if not source_dates:
+        return []
+    unsupported = []
+    for year, month, day in sorted(_explicit_calendar_dates(english_text), key=lambda value: (value[0] or 0, value[1], value[2])):
+        if not any(
+            (source_month, source_day) == (month, day)
+            and (year is None or source_year is None or source_year == year)
+            for source_year, source_month, source_day in source_dates
+        ):
+            unsupported.append(f"{year or ''}-{month:02d}-{day:02d}".lstrip("-"))
+    return unsupported
 
 
 def missing_source_values(source_text: str, english_text: str) -> list[str]:
@@ -251,16 +356,7 @@ def missing_source_values(source_text: str, english_text: str) -> list[str]:
         if amount not in numbers or not _CURRENCY.search(english_text):
             missing.append(f"KRW {amount:,.0f}")
 
-    dates = {(int(year), int(month), int(day)) for year, month, day in _SOURCE_DATE.findall(source_text)}
-    dates.update((None, int(month), int(day)) for month, day in _SOURCE_MONTH_DAY.findall(source_text))
-    dates.update(_abbreviated_source_dates(source_text))
-    dates = {
-        date for date in dates
-        if date[0] is not None or not any(
-            year is not None and (month, day) == date[1:]
-            for year, month, day in dates
-        )
-    }
+    dates = _source_calendar_dates(source_text)
     for year, month, day in sorted(dates, key=lambda value: (value[0] or 0, value[1], value[2])):
         if not _has_month_day(english_text, month, day) or (year and Decimal(year) not in numbers):
             missing.append(f"{year or ''}-{month:02d}-{day:02d}".lstrip("-"))

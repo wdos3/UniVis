@@ -178,3 +178,21 @@ instructions. `metrics_complete=false` distinguishes partial call/token accounti
 from fully measured responses. Local photos remain available; none of these paths
 requires the user to transcribe Korean. Input limits, rate limits, unsupported
 browsers, connectivity failures, and legibility limits still exist.
+
+Coverage repair keeps its safe partial-result contract and a separate internal
+candidate notice. Only the photo orchestrator passes these candidates to the
+mandatory final support review; they are never serialized as unchecked output.
+Known rejections, blocked OCR and invented quotations remain excluded. Local
+presentation rules and direct date/amount contradiction checks run before the
+review, so its source-completeness verdict describes the same English that can
+be shown. Supported wording for one clause does not certify the whole source
+unit. Final source certification also requires surviving citations and collective
+value, condition, spending and printed-English-phrase checks. A supported complete
+replacement can clear an earlier gap; a discarded incorrect candidate does not
+permanently force a partial status.
+
+The photo review response uses required keyed enum verdicts for every supplied
+English field and source unit, preventing omissions and duplicate IDs in a valid
+structured response. This changes response bookkeeping, not the model or its
+evidence criteria. The existing three-list response remains the contract when
+the independent verifier is called without source units.

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from openai.lib._pydantic import to_strict_json_schema
 
-from app.models import LabeledFact, NoticeData, ReviewState, SourceFact
+from app.models import Contact, Deadline, LabeledFact, NoticeData, ReviewState, SourceFact
 from app.services.coverage import audit_coverage
 from app.services.coverage_repair import (
     CoverageProviderError,
@@ -41,7 +41,7 @@ class FakeResponses:
 
 
 def _run_repair(
-    source: str, response: RepairResponse | list[RepairResponse], *, notice: NoticeData | None = None,
+    source: str, response: RepairResponse | None | list[RepairResponse | None], *, notice: NoticeData | None = None,
     allow_partial: bool = False, unverified_source_texts: tuple[str, ...] = (),
 ):
     responses = FakeResponses(response)
@@ -1465,6 +1465,134 @@ def test_partial_mode_discards_cross_page_second_group_and_keeps_unaffected_firs
     assert result.has_verification_gaps is True
 
 
+@pytest.mark.parametrize("invalid", [
+    [_detail("P001-L9999", "Invented source meaning.")],
+    [_detail("P001-L0004", "Attend the interview."), _detail("P001-L0004", "An interview is scheduled.")],
+    [RepairDetail(unit_ids=["P001-L0003", "P001-L9999"], text="A selected topic guarantees acceptance.",
+                  category="research_topic", certain=True)],
+    [RepairDetail(unit_ids=["P001-L0003", "P001-L0004"], text="Choose a topic and attend the interview.",
+                  category="research_topic", certain=True), _detail("P001-L0004", "Attend the interview.")],
+])
+def test_partial_retry_quarantines_invalid_assignments_without_losing_independent_card_payment(invalid) -> None:
+    source = "신청서 제출\n재료비는 카드 결제\n연구 주제는 학생이 자유롭게 선정\n면접 참석"
+    initial = RepairResponse(
+        represented_unit_ids=[], details=[_detail("P001-L0001", "Submit the application form.", "application")],
+        decorative=[], unresolved_unit_ids=["P001-L0002", "P001-L0003", "P001-L0004"],
+    )
+    card_payment = "Pay material expenses by card."
+    retry = RepairResponse(
+        represented_unit_ids=[], details=[_detail("P001-L0002", card_payment, "funding"), *invalid],
+        decorative=[], unresolved_unit_ids=[],
+    )
+
+    result, calls = _run_repair(source, [initial, retry], allow_partial=True)
+
+    assert result.requests == len(calls) == 2
+    assert card_payment in simplified_text(result.notice)
+    assert result.review_candidates is not None and card_payment in simplified_text(result.review_candidates)
+    for detail in invalid:
+        assert detail.text not in simplified_text(result.notice)
+        assert detail.text not in simplified_text(result.review_candidates)
+    assert {unit.id for unit in result.unverified_units} == {"P001-L0003", "P001-L0004"}
+
+
+def test_partial_retry_keeps_student_selected_topic_despite_duplicate_noise_assignments() -> None:
+    source = "연구 주제는 학생이 자유롭게 선정\n대H\n성울"
+    initial = RepairResponse(
+        represented_unit_ids=[], details=[], decorative=[],
+        unresolved_unit_ids=["P001-L0001", "P001-L0002", "P001-L0003"],
+    )
+    topic = "Students freely choose their research topic."
+    retry = RepairResponse(
+        represented_unit_ids=[], details=[_detail("P001-L0001", topic, "research_topic")], decorative=[],
+        unresolved_unit_ids=["P001-L0002", "P001-L0002", "P001-L0003", "P001-L0003"],
+    )
+
+    result, calls = _run_repair(source, [initial, retry], allow_partial=True)
+
+    assert result.requests == len(calls) == 2
+    assert topic in simplified_text(result.notice)
+    assert result.review_candidates is not None and topic in simplified_text(result.review_candidates)
+    assert {unit.id for unit in result.unverified_units} == {"P001-L0002", "P001-L0003"}
+
+
+def test_partial_retry_quarantines_cross_page_group_without_discarding_independent_payment() -> None:
+    source = "[Page 1]\n재료비는 카드 결제\n면접 대상\n[Page 2]\n면접 안내"
+    initial = RepairResponse(
+        represented_unit_ids=[], details=[], decorative=[],
+        unresolved_unit_ids=["P001-L0001", "P001-L0002", "P002-L0001"],
+    )
+    invalid = "Both interview instructions apply together."
+    card_payment = "Pay material expenses by card."
+    retry = RepairResponse(
+        represented_unit_ids=[], details=[
+            _detail("P001-L0001", card_payment, "funding"),
+            RepairDetail(unit_ids=["P001-L0002", "P002-L0001"], text=invalid, category="application", certain=True),
+        ], decorative=[], unresolved_unit_ids=[],
+    )
+
+    result, calls = _run_repair(source, [initial, retry], allow_partial=True)
+
+    assert result.requests == len(calls) == 2
+    assert card_payment in simplified_text(result.notice)
+    assert result.review_candidates is not None and card_payment in simplified_text(result.review_candidates)
+    assert invalid not in simplified_text(result.notice) and invalid not in simplified_text(result.review_candidates)
+    assert {unit.id for unit in result.unverified_units} == {"P001-L0002", "P002-L0001"}
+
+
+def test_partial_retry_known_english_rejections_survive_quarantine_alongside_valid_repairs() -> None:
+    source = "신청서 제출\n재료비는 카드 결제"
+    rejected = "Everyone is automatically accepted."
+    notice = NoticeData(key_details=[LabeledFact(text=rejected, source_evidence=source.splitlines()[0])])
+    initial = RepairResponse(
+        represented_unit_ids=[], details=[_detail("P001-L0001", "Submit the application form.", "application")],
+        decorative=[], unresolved_unit_ids=["P001-L0002"],
+    )
+    card_payment = "Pay material expenses by card."
+    retry = RepairResponse(
+        represented_unit_ids=[], details=[_detail("P001-L0002", card_payment, "funding")],
+        decorative=[], unresolved_unit_ids=[], unsupported_english_ids=["E001", "E001", "E999"],
+    )
+
+    result, calls = _run_repair(source, [initial, retry], notice=notice, allow_partial=True)
+
+    assert result.requests == len(calls) == 2
+    assert rejected not in simplified_text(result.notice)
+    assert result.review_candidates is not None and rejected not in simplified_text(result.review_candidates)
+    assert card_payment in simplified_text(result.notice) and card_payment in simplified_text(result.review_candidates)
+
+
+def test_partial_retry_represented_assertion_cannot_replace_a_required_detail() -> None:
+    source = "재료비는 카드 결제\n신청서 제출"
+    initial = RepairResponse(
+        represented_unit_ids=[], details=[], decorative=[], unresolved_unit_ids=["P001-L0001", "P001-L0002"],
+    )
+    retry = RepairResponse(
+        represented_unit_ids=["P001-L0001"], details=[_detail("P001-L0002", "Submit the application form.", "application")],
+        decorative=[], unresolved_unit_ids=[],
+    )
+
+    result, _ = _run_repair(source, [initial, retry], allow_partial=True)
+
+    assert "Submit the application form." in simplified_text(result.notice)
+    assert [unit.id for unit in result.unverified_units] == ["P001-L0001"]
+
+
+def test_strict_retry_still_rejects_unknown_assignments_despite_an_independent_valid_detail() -> None:
+    initial = RepairResponse(
+        represented_unit_ids=[], details=[], decorative=[], unresolved_unit_ids=["P001-L0001"],
+    )
+    retry = RepairResponse(
+        represented_unit_ids=[], details=[
+            _detail("P001-L0001", "Pay material expenses by card.", "funding"),
+            _detail("P001-L9999", "Invented source meaning."),
+        ], decorative=[], unresolved_unit_ids=[],
+    )
+
+    with pytest.raises(CoverageProviderError, match="inconsistent targeted OCR audit"):
+        _run_repair("재료비는 카드 결제", [initial, retry])
+
+
 def test_partial_mode_removes_an_unsafe_primary_contact_and_marks_its_real_source_location() -> None:
     source = "담당팀에 문의\n신청서 제출"
     invented = "Contact the team at invented@example.org."
@@ -1619,7 +1747,7 @@ def test_valid_independent_detail_survives_pruning_of_a_same_worded_primary_with
     assert result.repaired_unit_count == 1
 
 
-def test_partial_mode_withholds_all_claims_when_retry_english_ids_cannot_be_localized() -> None:
+def test_partial_mode_ignores_unknown_retry_english_ids_without_losing_independently_valid_details() -> None:
     source = "신청서 제출\n면접 참석"
     initial = RepairResponse(
         represented_unit_ids=[], details=[_detail("P001-L0001", "Submit the application form.")],
@@ -1633,9 +1761,10 @@ def test_partial_mode_withholds_all_claims_when_retry_english_ids_cannot_be_loca
     result, calls = _run_repair(source, [initial, retry], allow_partial=True)
 
     assert result.requests == len(calls) == 2
-    assert simplified_text(result.notice) == ""
-    assert [unit.id for unit in result.unverified_units] == ["P001-L0001", "P001-L0002"]
-    assert result.has_verification_gaps is True
+    assert "Submit the application form." in simplified_text(result.notice)
+    assert "Attend the interview." in simplified_text(result.notice)
+    assert result.review_candidates is not None
+    assert result.unverified_units == () and result.has_verification_gaps is False
     assert result.usage_complete is True and result.total_tokens == 300
 
 
@@ -1680,6 +1809,177 @@ def test_partial_provider_failure_withholds_unaudited_claims_and_reports_only_kn
         assert "Submit the application form." in simplified_text(result.notice)
         assert [unit.id for unit in result.unverified_units] == ["P001-L0002"]
     assert all("Page 1, line" in gap for gap in result.notice.unverified_items)
+
+
+def test_initial_audit_failure_preserves_grounded_candidates_separately_from_safe_output() -> None:
+    source = "신청 마감: 2029.6.15 17:00\n문의: 02-710-2500 international@example.edu"
+    notice = NoticeData(
+        title="Program applications", purpose="Apply for the program.", summary="Applications are open.",
+        deadlines=[Deadline(date="2029-06-15", time="17:00", description="Application deadline.", source_evidence=source.splitlines()[0])],
+        contacts=[Contact(name="Program office", phone="02-710-2500", email="international@example.edu", source_evidence=source.splitlines()[1])],
+        unverified_items=["Applicants must pay an invented fee."],
+    )
+
+    result, calls = _run_repair(source, None, notice=notice, allow_partial=True)
+
+    assert len(calls) == result.requests == 1
+    assert simplified_text(result.notice) == ""
+    assert result.notice.title == "Untitled notice" and result.notice.summary == ""
+    assert result.review_candidates is not None
+    candidates = result.review_candidates
+    assert candidates.deadlines[0].date == "2029-06-15" and candidates.deadlines[0].time == "17:00"
+    assert candidates.contacts[0].phone == "02-710-2500"
+    assert candidates.contacts[0].email == "international@example.edu"
+    assert (candidates.title, candidates.purpose, candidates.summary) == (notice.title, notice.purpose, notice.summary)
+    assert candidates.unverified_items == []
+    assert all(fact.state == ReviewState.NEEDS_REVIEW for fact in candidates.source_facts)
+    assert result.has_verification_gaps and not result.usage_complete
+    assert len(result.unverified_units) == 2
+    assert notice.deadlines[0].state == ReviewState.VERIFIED
+
+
+@pytest.mark.parametrize("retry", [
+    None,
+    RepairResponse(represented_unit_ids=[], details=[], decorative=[], unresolved_unit_ids=[], unsupported_english_ids=["E999"]),
+    RepairResponse(represented_unit_ids=[], details=[_detail("P999-L9999", "Invented source meaning.")], decorative=[], unresolved_unit_ids=[]),
+])
+def test_failed_retry_preserves_primary_and_unaffected_valid_repairs_as_review_candidates(retry) -> None:
+    source = "신청 마감: 2029.6.15 17:00\n문의: 02-710-2500\n신청서 제출"
+    notice = NoticeData(
+        deadlines=[Deadline(date="2029-06-15", time="17:00", source_evidence=source.splitlines()[0])],
+        contacts=[Contact(phone="02-710-2500", source_evidence=source.splitlines()[1])],
+    )
+    initial = RepairResponse(
+        represented_unit_ids=[], details=[_detail("P001-L0003", "Submit the application form.", "document")],
+        decorative=[], unresolved_unit_ids=["P001-L0001", "P001-L0002"],
+    )
+
+    result, calls = _run_repair(source, [initial, retry], notice=notice, allow_partial=True)
+
+    assert len(calls) == result.requests == 2
+    assert result.notice.deadlines == [] and result.notice.contacts == []
+    assert result.review_candidates is not None
+    candidates = result.review_candidates
+    assert candidates.deadlines[0].date == "2029-06-15"
+    assert candidates.contacts[0].phone == "02-710-2500"
+    assert "Submit the application form." in simplified_text(candidates)
+    assert "Invented source meaning" not in simplified_text(candidates)
+    assert result.has_verification_gaps
+
+
+@pytest.mark.parametrize("stage,rejections", [
+    ("initial", ["E001", "E999"]),
+    ("initial", ["E001", "E001"]),
+    ("retry", ["E001", "E999"]),
+    ("retry", ["E001", "E001"]),
+])
+def test_known_rejections_are_never_resurrected_by_candidate_recovery(stage, rejections) -> None:
+    source = "온라인 접수\n면접 참석"
+    notice = NoticeData(key_details=[
+        LabeledFact(text="Apply online.", source_evidence=source.splitlines()[0]),
+        LabeledFact(text="Attend the interview.", source_evidence=source.splitlines()[1]),
+    ])
+    initial = RepairResponse(
+        represented_unit_ids=[], details=[], decorative=[], unresolved_unit_ids=["P001-L0001", "P001-L0002"],
+        unsupported_english_ids=rejections if stage == "initial" else [],
+    )
+    retry = RepairResponse(
+        represented_unit_ids=[], details=[], decorative=[], unresolved_unit_ids=["P001-L0001", "P001-L0002"],
+        unsupported_english_ids=rejections if stage == "retry" else [],
+    )
+
+    result, _ = _run_repair(source, [initial, retry], notice=notice, allow_partial=True)
+
+    assert simplified_text(result.notice) == ""
+    assert result.review_candidates is not None
+    assert [item.text for item in result.review_candidates.key_details] == ["Attend the interview."]
+
+
+def test_known_retry_rejection_outside_its_target_scope_still_excludes_the_candidate() -> None:
+    source = "온라인 접수\n면접 참석"
+    notice = NoticeData(key_details=[
+        LabeledFact(text="Apply online.", source_evidence=source.splitlines()[0]),
+        LabeledFact(text="Attend the interview.", source_evidence=source.splitlines()[1]),
+    ])
+    initial = RepairResponse(
+        represented_unit_ids=["P001-L0002"], details=[], decorative=[], unresolved_unit_ids=["P001-L0001"],
+    )
+    retry = RepairResponse(
+        represented_unit_ids=[], details=[], decorative=[], unresolved_unit_ids=["P001-L0001"],
+        unsupported_english_ids=["E002", "E999"],
+    )
+
+    result, _ = _run_repair(source, [initial, retry], notice=notice, allow_partial=True)
+
+    assert result.review_candidates is not None
+    assert [item.text for item in result.review_candidates.key_details] == ["Apply online."]
+
+
+def test_initial_failure_candidate_recovery_excludes_blocked_spanning_and_invented_citations() -> None:
+    source = "온라인 접수\n어학 성적 기준"
+    notice = NoticeData(key_details=[
+        LabeledFact(text="Apply online.", source_evidence=source.splitlines()[0]),
+        LabeledFact(text="English scores are required.", source_evidence=source.splitlines()[1]),
+        LabeledFact(text="English scores.", source_evidence="어학 성적"),
+        LabeledFact(text="Apply online and satisfy English scores.", source_evidence=source),
+        LabeledFact(text="An application fee is required.", source_evidence="참가비 납부"),
+    ])
+
+    result, _ = _run_repair(
+        source, None, notice=notice, allow_partial=True, unverified_source_texts=(" 어학 성적 기준 ",),
+    )
+
+    assert simplified_text(result.notice) == ""
+    assert result.review_candidates is not None
+    assert [item.text for item in result.review_candidates.key_details] == ["Apply online."]
+
+
+def test_explicitly_rejected_context_is_not_restored_as_a_review_candidate() -> None:
+    source = "프로그램 안내\n신청서 제출"
+    notice = NoticeData(title="Guaranteed admission", purpose="Automatic admission", summary="Everyone is admitted.")
+    initial = RepairResponse(
+        represented_unit_ids=[], details=[], decorative=[], unresolved_unit_ids=["P001-L0001", "P001-L0002"],
+        unsupported_english_ids=["E001", "E002", "E003", "E999"],
+    )
+    retry = RepairResponse(
+        represented_unit_ids=[], details=[], decorative=[], unresolved_unit_ids=["P001-L0001", "P001-L0002"],
+    )
+
+    result, _ = _run_repair(source, [initial, retry], notice=notice, allow_partial=True)
+
+    assert result.review_candidates is not None
+    assert result.review_candidates.title == "Untitled notice"
+    assert result.review_candidates.purpose == result.review_candidates.summary == ""
+
+
+def test_review_candidates_use_audited_quantitative_replacement_without_reviving_primary() -> None:
+    source = "접수 마감: 2029.10.17 18:00\n대H"
+    notice = NoticeData(deadlines=[Deadline(
+        date="2029-10-15", time="18:00", description="Application deadline.", source_evidence=source.splitlines()[0],
+    )])
+    initial = RepairResponse(
+        represented_unit_ids=[], details=[_detail("P001-L0001", "Apply by October 17, 2029 at 18:00.", "schedule")],
+        decorative=[], unresolved_unit_ids=["P001-L0002"],
+    )
+    retry = RepairResponse(represented_unit_ids=[], details=[], decorative=[], unresolved_unit_ids=["P001-L0002"])
+
+    result, _ = _run_repair(source, [initial, retry], notice=notice, allow_partial=True)
+
+    assert result.review_candidates is not None
+    assert result.review_candidates.deadlines == []
+    assert "October 17, 2029" in simplified_text(result.review_candidates)
+    assert "2029-10-15" not in simplified_text(result.review_candidates)
+
+
+def test_strict_coverage_result_does_not_expose_review_candidates() -> None:
+    source = "온라인 접수"
+    notice = NoticeData(key_details=[LabeledFact(text="Apply online.", source_evidence=source)])
+    parsed = RepairResponse(represented_unit_ids=["P001-L0001"], details=[], decorative=[], unresolved_unit_ids=[])
+
+    result, _ = _run_repair(source, parsed, notice=notice)
+
+    assert result.review_candidates is None
+    assert "Apply online." in simplified_text(result.notice)
 
 
 @pytest.mark.parametrize("token", ["OK", "2", "O", "0", "e", "JU", "00", "Um", "Pay"])

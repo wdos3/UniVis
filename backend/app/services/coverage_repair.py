@@ -10,7 +10,7 @@ from typing import Literal
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import LabeledFact, NoticeData, ReviewState, SourceFact
+from app.models import GroundedItem, LabeledFact, NoticeData, ReviewState, SourceFact
 from app.services.coverage import CoverageUnit, audit_coverage, display_text
 from app.services.coverage_coalescing import LABELED_FIELDS, coalesce_exact_repair_duplicates
 from app.services.english_literals import (
@@ -78,6 +78,9 @@ class CoverageRepairResult:
     has_verification_gaps: bool = False
     usage_complete: bool = True
     failed_requests: int = 0
+    # Internal candidates may be published only after independent support review.
+    # The safe notice retains the existing standalone partial-result contract.
+    review_candidates: NoticeData | None = None
 
 
 REPAIR_PROMPT = """Audit the English notice digest against EVERY Korean OCR source unit, including cited units.
@@ -250,7 +253,7 @@ def _close_grouped_retry_ids(response: RepairResponse, retry_ids: set[str]) -> N
 
 
 def _partition_retry_reasons(
-    response: RepairResponse, by_id: dict[str, CoverageUnit],
+    response: RepairResponse, by_id: dict[str, CoverageUnit], *, unlocalizable_ids: set[str] | None = None,
 ) -> dict[str, list[str]]:
     """Locate faulty provider assignments without treating them as source errors."""
     expected = set(by_id)
@@ -268,7 +271,7 @@ def _partition_retry_reasons(
         if not ids or len(ids) != len(set(ids)) or not set(ids) <= expected:
             # With no real source ID, the intended line cannot be guessed.
             # Re-examine the full source instead of attaching invented evidence.
-            for unit_id in known or expected:
+            for unit_id in known or (expected if unlocalizable_ids is None else unlocalizable_ids):
                 reasons.setdefault(unit_id, []).append(
                     "The previous audit used unknown, empty, or repeated source IDs. Use only the listed IDs exactly once."
                 )
@@ -328,6 +331,27 @@ def _discard_retry_assignments(
             english_id for english_id in response.unsupported_english_ids if english_id in known_english
         )),
     )
+
+
+def _quarantine_targeted_retry(
+    response: RepairResponse, by_id: dict[str, CoverageUnit], known_english: set[str],
+) -> RepairResponse:
+    """Keep independent valid retry claims while withholding faulty groups.
+
+    An entirely unknown assignment has no identifiable target. Unlike the first
+    audit, this final attempt cannot re-examine all source units, and that stray
+    assignment does not invalidate separately grounded known assignments.
+    """
+    expected = set(by_id)
+    invalid_ids = set(_partition_retry_reasons(response, by_id, unlocalizable_ids=set()))
+    # A targeted retry requires complete details; a represented-only assertion
+    # cannot substitute for the missing meaning that triggered the retry.
+    invalid_ids.update(response.represented_unit_ids)
+    _close_grouped_retry_ids(response, invalid_ids)
+    retained = _discard_retry_assignments(response, invalid_ids, expected, known_english)
+    assigned = _assigned_ids(retained, expected)
+    retained.unresolved_unit_ids.extend(sorted(expected - assigned))
+    return retained
 
 
 def _remove_unsupported_english(notice: NoticeData, unsupported_texts: set[str]) -> NoticeData:
@@ -521,6 +545,60 @@ def _literal_source_ids(phrase: str, units: list[CoverageUnit]) -> set[str]:
     }
 
 
+def _unsafe_generated_item(field: str, item: GroundedItem, source_text: str) -> bool:
+    text = display_text(item)
+    return bool(
+        KOREAN_TEXT.search(text) or unsupported_contacts(source_text, text)
+        or (field == "fees" and _fee_source_issue(item.source_evidence))
+        or _ambiguous_recruitment_count(item.source_evidence, text)
+        or _unfinished_restriction(item.source_evidence, text)
+        or UNFINISHED_CONNECTIVE.search(item.source_evidence.strip())
+    )
+
+
+def _review_candidates(
+    notice: NoticeData, validated: list[tuple[RepairDetail, list[CoverageUnit]]],
+    source_text: str, units: list[CoverageUnit], blocked_ids: set[str],
+    rejected_english_texts: set[str],
+) -> NoticeData:
+    """Retain grounded possibilities for a separate, mandatory support review.
+
+    A coverage protocol failure is not evidence that a legible primary claim is
+    false. Candidates are kept separately from safe output, excluding explicit
+    rejections, locally unsafe claims and any quotation touching blocked OCR.
+    """
+    candidates = _append_details(_remove_unsupported_english(notice, rejected_english_texts), validated)
+    candidates = _remove_unsupported_english(candidates, rejected_english_texts)
+    blocked = [
+        (unit.page, re.sub(r"\s+", "", unit.text).casefold())
+        for unit in units if unit.id in blocked_ids
+    ]
+    for field in GROUNDED_FIELDS:
+        retained = []
+        for item in getattr(candidates, field):
+            evidence = re.sub(r"\s+", "", item.source_evidence).casefold()
+            touches_blocked = any(
+                item.source_page in (None, page) and (evidence in source or source in evidence)
+                for page, source in blocked
+            )
+            if _unsafe_generated_item(field, item, source_text) or touches_blocked:
+                continue
+            item.state = ReviewState.NEEDS_REVIEW
+            retained.append(item)
+        setattr(candidates, field, retained)
+    for field in NOTICE_CONTEXT_FIELDS:
+        text = getattr(candidates, field)
+        if KOREAN_TEXT.search(text) or unsupported_contacts(source_text, text):
+            setattr(candidates, field, "Untitled notice" if field == "title" else "")
+    for field in NOTICE_REVIEW_FIELDS:
+        setattr(candidates, field, [])
+    for fact in candidates.source_facts:
+        fact.state = ReviewState.NEEDS_REVIEW
+    for step, action in enumerate(candidates.actions, 1):
+        action.step = step
+    return coalesce_exact_repair_duplicates(candidates)
+
+
 def _partial_notice(
     notice: NoticeData, validated: list[tuple[RepairDetail, list[CoverageUnit]]],
     source_text: str, units: list[CoverageUnit], unverified: set[str],
@@ -546,14 +624,7 @@ def _partial_notice(
                 setattr(single, field, [item])
                 item_audit = audit_coverage(single, source_text)
                 cited = {unit.id for unit in item_audit.units} - {unit.id for unit in item_audit.uncovered}
-                text = display_text(item)
-                unsafe = bool(
-                    KOREAN_TEXT.search(text) or unsupported_contacts(source_text, text)
-                    or (field == "fees" and _fee_source_issue(item.source_evidence))
-                    or _ambiguous_recruitment_count(item.source_evidence, text)
-                    or _unfinished_restriction(item.source_evidence, text)
-                    or UNFINISHED_CONNECTIVE.search(item.source_evidence.strip())
-                )
+                unsafe = _unsafe_generated_item(field, item, source_text)
                 if unsafe:
                     unverified.update(cited)
                     if not context_gaps:
@@ -797,6 +868,12 @@ async def repair_coverage(
         return CoverageRepairResult(notice=notice.model_copy(deep=True), requests=0)
     if len(audit.units) > MAX_COVERAGE_UNITS:
         raise CoverageRepairError("This notice has too many OCR lines for a safe single completeness audit.")
+    by_id = {unit.id: unit for unit in audit.units}
+    blocked_texts = {re.sub(r"\s+", "", text).casefold() for text in unverified_source_texts}
+    blocked_ids = {
+        unit.id for unit in audit.units
+        if allow_partial and re.sub(r"\s+", "", unit.text).casefold() in blocked_texts
+    }
 
     if client is None:
         api_key = os.getenv("OPENAI_API_KEY")
@@ -852,15 +929,10 @@ async def repair_coverage(
         return CoverageRepairResult(
             notice=repaired, requests=1, unverified_units=tuple(audit.units),
             has_verification_gaps=True, usage_complete=False, failed_requests=1,
+            review_candidates=_review_candidates(notice, [], source_text, audit.units, blocked_ids, set()),
         )
     requests = 1
     failed_requests = 0
-    by_id = {unit.id: unit for unit in audit.units}
-    blocked_texts = {re.sub(r"\s+", "", text).casefold() for text in unverified_source_texts}
-    blocked_ids = {
-        unit.id for unit in audit.units
-        if allow_partial and re.sub(r"\s+", "", unit.text).casefold() in blocked_texts
-    }
     retry_reasons = _partition_retry_reasons(parsed, by_id)
     retry_all_english = False
     try:
@@ -878,6 +950,7 @@ async def repair_coverage(
     assigned = _assigned_ids(parsed, set(by_id))
     rejected_english_texts = {english_fields[english_id] for english_id in unsupported_ids}
     notice = _remove_unsupported_english(notice, rejected_english_texts)
+    review_primary = notice
     audit = audit_coverage(notice, source_text)
     cited_ids = {unit.id for unit in audit.units} - {unit.id for unit in audit.uncovered}
     for unit in source_units:
@@ -932,6 +1005,12 @@ async def repair_coverage(
     # Earlier image/contact/table checks can establish that a source line is
     # unreadable. A semantic model must not reconstruct its missing characters.
     retry_ids.difference_update(blocked_ids)
+    review_details: list[tuple[RepairDetail, list[CoverageUnit]]] = []
+    if allow_partial:
+        first_validated, _, _ = _validate_partial_response(
+            parsed, audit.units, cited_ids, audit.cited_english_by_unit, rejected_english_texts, blocked_ids,
+        )
+        review_details = [entry for entry in first_validated if not set(entry[0].unit_ids) & retry_ids]
     if retry_ids:
         retry_units = [{
             **unit,
@@ -960,6 +1039,16 @@ async def repair_coverage(
             )
         else:
             token_totals = tuple(first + second for first, second in zip(token_totals, retry_tokens))
+        # Even a malformed rejection list can explicitly reject a known claim.
+        # Keep those exclusions before discarding the unlocalizable response.
+        rejected_english_texts.update(
+            english_fields[english_id] for english_id in set(retry.unsupported_english_ids) & set(english_fields)
+        )
+        if allow_partial:
+            notice = _remove_unsupported_english(notice, rejected_english_texts)
+            retry = _quarantine_targeted_retry(
+                retry, {unit_id: by_id[unit_id] for unit_id in retry_ids}, retry_english_ids,
+            )
         try:
             retry_unsupported = _unsupported_ids(retry, retry_english_ids)
         except CoverageProviderError:
@@ -999,6 +1088,10 @@ async def repair_coverage(
         repaired, unverified_ids, context_gaps = _partial_notice(
             notice, validated, source_text, audit.units, unverified_ids,
         )
+        candidate_details = list(validated)
+        for entry in review_details:
+            if entry[0] not in [detail for detail, _ in validated]:
+                candidate_details.append(entry)
         return CoverageRepairResult(
             notice=repaired, requests=requests,
             input_tokens=token_totals[0], output_tokens=token_totals[1], total_tokens=token_totals[2],
@@ -1008,6 +1101,9 @@ async def repair_coverage(
             unverified_units=tuple(unit for unit in audit.units if unit.id in unverified_ids),
             has_verification_gaps=bool(unverified_ids or context_gaps),
             usage_complete=not failed_requests, failed_requests=failed_requests,
+            review_candidates=_review_candidates(
+                review_primary, candidate_details, source_text, audit.units, blocked_ids, rejected_english_texts,
+            ),
         )
     validated, decorative_count = _validate_response(
         parsed, audit.units, cited_ids, audit.cited_english_by_unit, rejected_english_texts,

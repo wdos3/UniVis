@@ -193,7 +193,7 @@ async def _complete_english_coverage(
     review_started = perf_counter()
     if allow_partial:
         final_review = await review_notice_english(
-            repair.notice, pipeline.source_text, layout_context=layout_context, primary_notice_title=pipeline.notice.title,
+            repair.review_candidates or repair.notice, pipeline.source_text, layout_context=layout_context, primary_notice_title=pipeline.notice.title,
         )
     elapsed_ms = round((perf_counter() - started) * 1000)
     verification_ms = round((perf_counter() - review_started) * 1000) if allow_partial else 0
@@ -208,8 +208,8 @@ async def _complete_english_coverage(
         coverage_latency_ms=elapsed_ms - verification_ms,
         english_verification_latency_ms=verification_ms,
         total_latency_ms=pipeline.total_latency_ms + elapsed_ms,
-        english_coverage_status="partial" if repair.has_verification_gaps or final_review.has_verification_gaps else "audited",
-        unverified_source_units=max(len(repair.unverified_units), final_review.unverified_source_units),
+        english_coverage_status="partial" if (final_review.has_verification_gaps if allow_partial else repair.has_verification_gaps) else "audited",
+        unverified_source_units=final_review.unverified_source_units if allow_partial else len(repair.unverified_units),
         metrics_complete=pipeline.metrics_complete and repair.usage_complete and final_review.usage_complete,
     )
 

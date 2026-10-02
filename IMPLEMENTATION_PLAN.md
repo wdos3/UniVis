@@ -26,6 +26,14 @@ Continue `prototype/paddleocr-gpt41mini`; preserve Version 1 and keep Version 2 
 
 ## Generalization follow-through
 
+Retain grounded candidates internally through partial audit failures, then
+require final English support and whole-source-unit meaning checks. Resolve local
+presentation changes before review; certify only the surviving display. Preserve
+independent valid retry assignments while quarantining malformed ID groups.
+Remove the redundant global warning banner; keep concrete source gaps and
+optional source-preserving retry visible. Validate actual photo and positioned
+table flows after the final changes, and record known incompleteness honestly.
+
 The user requires one pipeline for varied Korean images, not a bespoke Sogang
 translator. Remove complete-sentence canonical rewrites and keep only source-backed
 glossary corrections. Preserve gpt-4o-mini and the independent audit with one bounded

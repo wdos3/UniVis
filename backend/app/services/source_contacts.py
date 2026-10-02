@@ -12,7 +12,12 @@ _PHONE_CANDIDATE = re.compile(
 )
 # Korean labels and grammatical particles often directly adjoin a contact.
 # ASCII token boundaries reject partial Latin addresses without rejecting them.
-_EMAIL = re.compile(r"(?<![A-Za-z0-9_@])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![A-Za-z0-9_@-]|\.[A-Za-z0-9_-])")
+# A leading pipe is a notice separator; an internal pipe remains address text.
+_EMAIL = re.compile(
+    r"(?<![A-Za-z0-9_@])[A-Za-z0-9.!#$%&'*+/=?^_`{}~-]"
+    r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]*@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+    r"(?![A-Za-z0-9_@-]|\.[A-Za-z0-9_-])"
+)
 _PAGE_MARKER = re.compile(r"^\[Page (\d+)\]$")
 _CONTACT_CUE = re.compile(r"문의|전화|연락|\b(?:phone|tel|contact)\b", re.IGNORECASE)
 
@@ -45,6 +50,15 @@ def phone_values(text: str) -> dict[str, str]:
 
 
 def email_values(text: str) -> set[str]:
+    # Without spacing, a printed phone|email pair also resembles one long
+    # email local part. Tokenize only pipes following recognized phone values.
+    recognized_phones = phone_values(text)
+    phone_separators = {
+        match.end() for match in _PHONE.finditer(text)
+        if text[match.end():].startswith("|") and phone_digits(match.group()) in recognized_phones
+    }
+    if phone_separators:
+        text = "".join(" " if index in phone_separators else char for index, char in enumerate(text))
     return {match.group().casefold() for match in _EMAIL.finditer(text)}
 
 

@@ -5,12 +5,16 @@ import re
 
 from app.models import NoticeData, ReviewState
 from app.services.coverage import audit_coverage, display_text
-from app.services.english_literals import unsupported_currency_amounts
+from app.services.english_literals import (
+    missing_english_literals, missing_source_conditions, missing_source_values, missing_spending_rules,
+    unsupported_currency_amounts, unsupported_source_dates,
+)
 from app.services.english_verification import (
-    EnglishSupportField, EnglishSupportProviderError, verify_english_support,
+    EnglishSupportField, EnglishSupportSourceUnit, EnglishSupportProviderError, verify_english_support,
 )
 from app.services.source_grounding import GROUNDED_FIELDS
 from app.services.source_fragments import broken_transliteration_reason
+from app.services.text import simplified_text
 
 
 _BARE_TABLE_VALUE = re.compile(r"(?:(?:팀|개인)\s*)?(?:[\d,.]+|\d+[A-Za-z]+|[A-Za-z]+\d+)\s*(?:(?:만|천|억)?\s*원|명|작품|점?\s*이상)")
@@ -84,6 +88,28 @@ class EnglishNoticeReview:
     has_verification_gaps: bool = False
 
 
+def _prepare_review_notice(notice: NoticeData, source_text: str) -> tuple[NoticeData, bool]:
+    """Resolve local presentation rules before certifying the displayed meaning."""
+    prepared = notice.model_copy(deep=True)
+    prepared.ambiguities = []
+    prepared.unverified_items = []
+    structural_gaps = False
+    for action in prepared.actions:
+        if action.required_items and not _DOCUMENT_CITATION.search(action.source_evidence):
+            # An application quote alone cannot place interview documents in
+            # the application checklist. Review the actual retained checklist.
+            action.required_items = []
+            structural_gaps = True
+    preferences = [item for item in prepared.eligibility if _PREFERENCE_LABEL.search(item.label)]
+    if preferences:
+        prepared.eligibility = [item for item in prepared.eligibility if item not in preferences]
+        if "우대" in source_text:
+            prepared.key_details.extend(preferences)
+        else:
+            structural_gaps = True
+    return prepared, structural_gaps
+
+
 async def review_notice_english(
     notice: NoticeData, source_text: str, *, layout_context: str = "", primary_notice_title: str = "",
 ) -> EnglishNoticeReview:
@@ -93,7 +119,9 @@ async def review_notice_english(
     literals alone cannot establish that those sentences preserve source scope.
     This independent pass reviews the final wording and can only withhold it.
     """
+    notice, structural_gaps = _prepare_review_notice(notice, source_text)
     fields: list[EnglishSupportField] = []
+    source_units = audit_coverage(notice, source_text).units
     item_ids: dict[tuple[str, int], str] = {}
     for field in GROUNDED_FIELDS:
         for index, item in enumerate(getattr(notice, field)):
@@ -128,9 +156,31 @@ async def review_notice_english(
             notice=withheld, unverified_source_units=len(units), has_verification_gaps=bool(units),
         )
 
+    locally_rejected = {
+        field.id for field in fields
+        if _unassociated_source_fragment(field)
+        or (field.source_evidence and unsupported_currency_amounts(field.source_evidence, field.text))
+        or (field.source_evidence and unsupported_source_dates(field.source_evidence, field.text))
+        or broken_transliteration_reason(field.source_evidence, field.text, field=field.field, label=field.label)
+    }
+    english_by_quote: dict[tuple[int | None, str], list[str]] = {}
+    for field in fields:
+        if field.id not in locally_rejected and field.source_evidence:
+            english_by_quote.setdefault((field.source_page, field.source_evidence), []).append(field.text)
+    # Several items may legitimately share a multi-fact quotation. A date does
+    # not need to repeat its neighboring topic's printed phrase; the surviving
+    # items collectively must preserve it before their source is certified.
+    locally_rejected.update(
+        field.id for field in fields if field.source_evidence
+        and missing_english_literals(
+            field.source_evidence, " | ".join(english_by_quote.get((field.source_page, field.source_evidence), [])),
+        )
+    )
+    review_fields = [field for field in fields if field.id not in locally_rejected]
     try:
         verdict = await verify_english_support(
-            fields, source_text, layout_context=layout_context, primary_notice_title=primary_notice_title, allow_partial=True,
+            review_fields, source_text, layout_context=layout_context, primary_notice_title=primary_notice_title, allow_partial=True,
+            source_units=[EnglishSupportSourceUnit(id=unit.id, text=unit.text, page=unit.page, line=unit.line) for unit in source_units],
         )
     except EnglishSupportProviderError as exc:
         # No completed support review exists. Keep the local source and English
@@ -141,57 +191,35 @@ async def review_notice_english(
         usage_complete = exc.usage_complete
         failure = True
         partition_complete = False
+        certified_source_ids: set[str] = set()
     else:
         rejected = set(verdict.unsupported_ids) | set(verdict.insufficient_ids)
         requests = verdict.requests
         input_tokens, output_tokens, total_tokens = verdict.input_tokens, verdict.output_tokens, verdict.total_tokens
         usage_complete = verdict.usage_complete
         failure = False
-        partition_complete = verdict.partition_complete
+        partition_complete = verdict.partition_complete and verdict.source_partition_complete
+        certified_source_ids = set(verdict.fully_covered_source_ids)
 
-    rejected.update(
-        field.id for field in fields
-        if _unassociated_source_fragment(field)
-        or (field.source_evidence and unsupported_currency_amounts(field.source_evidence, field.text))
-        or broken_transliteration_reason(field.source_evidence, field.text, field=field.field, label=field.label)
-    )
+    rejected.update(locally_rejected)
 
     reviewed = notice.model_copy(deep=True)
-    structural_gaps = False
     # Provider-authored review strings can themselves contain instructions.
     # Rebuild gaps from source coverage instead of treating free prose as safe.
     reviewed.ambiguities = []
     reviewed.unverified_items = []
-    rejected_items = NoticeData()
     rejected_fact_ids: set[str] = set()
     for field in GROUNDED_FIELDS:
-        kept, removed = [], []
+        kept = []
         for index, item in enumerate(getattr(reviewed, field)):
             if item_ids.get((field, index)) in rejected:
-                removed.append(item)
                 rejected_fact_ids.update(item.source_fact_ids)
             else:
                 kept.append(item)
         setattr(reviewed, field, kept)
-        setattr(rejected_items, field, removed)
     for field, field_id in context_ids.items():
         if field_id in rejected:
             setattr(reviewed, field, "Untitled notice" if field == "title" else "")
-    for action in reviewed.actions:
-        if action.required_items and not _DOCUMENT_CITATION.search(action.source_evidence):
-            # A source quote for applying cannot establish a document list or
-            # move interview-stage certificates into the application step.
-            action.required_items = []
-            structural_gaps = True
-    preferences = [item for item in reviewed.eligibility if _PREFERENCE_LABEL.search(item.label)]
-    if preferences:
-        reviewed.eligibility = [item for item in reviewed.eligibility if item not in preferences]
-        if "우대" in source_text:
-            # Labels are hidden under the Eligibility heading. Preserve an
-            # independently reviewed preference under its visible own label.
-            reviewed.key_details.extend(preferences)
-        else:
-            structural_gaps = True
     for step, action in enumerate(reviewed.actions, 1):
         action.step = step
     for fact in reviewed.source_facts:
@@ -199,11 +227,29 @@ async def review_notice_english(
             fact.state = ReviewState.NEEDS_REVIEW
 
     source_audit = audit_coverage(reviewed, source_text)
-    rejected_audit = audit_coverage(rejected_items, source_text)
-    uncited_rejected_ids = {unit.id for unit in rejected_audit.uncovered}
-    withheld_units = {unit.id for unit in rejected_audit.units if unit.id not in uncited_rejected_ids}
-    unverified_ids = withheld_units | {unit.id for unit in source_audit.uncovered}
-    if rejected or unverified_ids or not partition_complete or structural_gaps:
+    uncovered_ids = {unit.id for unit in source_audit.uncovered}
+    # A supported field may express only one clause of its source quotation.
+    # Full-unit verification and actual surviving citations are both required
+    # before a former completeness gap can be cleared.
+    verified_ids = {
+        unit.id for unit in source_audit.units
+        if unit.id in certified_source_ids and unit.id not in uncovered_ids
+        and not missing_source_values(unit.text, " | ".join(source_audit.cited_english_by_unit[unit.id]))
+        and not missing_english_literals(unit.text, " | ".join(source_audit.cited_english_by_unit[unit.id]))
+        and not missing_source_conditions(unit.text, " | ".join(source_audit.cited_english_by_unit[unit.id]))
+        and not missing_spending_rules(unit.text, " | ".join(source_audit.cited_english_by_unit[unit.id]))
+    }
+    # Parenthesized printed terminology can span OCR lines. A unit-by-unit
+    # check alone would miss a phrase split across two source units.
+    page_units: dict[int, list] = {}
+    for unit in source_audit.units:
+        page_units.setdefault(unit.page, []).append(unit)
+    digest = simplified_text(reviewed)
+    for units in page_units.values():
+        if missing_english_literals("\n".join(unit.text for unit in units), digest):
+            verified_ids.difference_update(unit.id for unit in units)
+    unverified_ids = {unit.id for unit in source_audit.units} - verified_ids
+    if unverified_ids:
         if failure:
             message = (
                 "The final English verification service was unavailable. Instructions are withheld for this attempt; "
@@ -236,5 +282,5 @@ async def review_notice_english(
     return EnglishNoticeReview(
         notice=reviewed, requests=requests, input_tokens=input_tokens,
         output_tokens=output_tokens, total_tokens=total_tokens, usage_complete=usage_complete,
-        unverified_source_units=len(unverified_ids), has_verification_gaps=bool(rejected or unverified_ids or not partition_complete or structural_gaps),
+        unverified_source_units=len(unverified_ids), has_verification_gaps=bool(unverified_ids),
     )

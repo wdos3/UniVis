@@ -85,6 +85,42 @@ def test_korean_labels_and_particles_do_not_hide_printed_email(source: str) -> N
     assert unsupported_contacts(source, "Send documents to grants@example.edu.") == []
 
 
+@pytest.mark.parametrize("source", [
+    "문의(02.710.2500 |convedu@sogang.ac.kr)",
+    "문의02.710.2500|convedu@sogang.ac.kr로 연락",
+    "02-710-2500|convedu@sogang.ac.kr",
+    "전화(+82 2-710-2500)|convedu@sogang.ac.kr",
+    "|convedu@sogang.ac.kr|",
+    "문의|convedu@sogang.ac.kr에게 연락",
+    "문의 | convedu@sogang.ac.kr | 장학팀",
+])
+def test_notice_pipe_separators_do_not_become_part_of_the_email(source: str) -> None:
+    assert email_values(source) == {"convedu@sogang.ac.kr"}
+    assert unsupported_contacts(source, "Email convedu@sogang.ac.kr.") == []
+
+
+@pytest.mark.parametrize("address", [
+    "research.team+2029@example.edu", "student-grants@example.edu",
+    "grants_team@example.edu", "first|last@example.edu", "a!b@example.edu",
+])
+def test_address_punctuation_is_preserved_inside_notice_delimiters(address: str) -> None:
+    assert email_values(f"문의|{address}|장학팀") == {address}
+    assert unsupported_contacts(f"문의|{address}", f"Email {address}.") == []
+
+
+def test_pipe_between_two_emails_keeps_both_complete_addresses() -> None:
+    assert email_values("grants@example.edu|admin@example.edu") == {
+        "grants@example.edu", "admin@example.edu",
+    }
+
+
+def test_contact_normalization_accepts_a_correct_email_after_the_source_pipe() -> None:
+    notice = NoticeData(contacts=[Contact(
+        email="convedu@sogang.ac.kr", source_evidence="문의(02.710.2500 |convedu@sogang.ac.kr)",
+    )])
+    assert normalize_notice(notice).contacts[0].email == "convedu@sogang.ac.kr"
+
+
 @pytest.mark.parametrize("source", ["grants@example.edu9", "grants@example.edu_", "grants@example.edu@other.org",
                                      "grants@example.edu.au2", "grants@example.edu.au-z"])
 def test_email_does_not_accept_a_partial_latin_address(source: str) -> None:
