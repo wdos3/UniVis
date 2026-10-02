@@ -167,7 +167,7 @@ the failed references are not successes or OCR measurements.
 
 ### Automated checks and reviewed fixes
 
-Final backend checks: `python -m pytest backend/tests -q` **688 passed**;
+Final backend checks: `python -m pytest backend/tests -q` **706 passed**;
 `ruff check backend/app backend/tests` passed. Six dependency deprecation warnings
 remain. Frontend: `npm run test` **75 passed in nine files**, `npm run lint`,
 and `npm run build` (TypeScript, Vite, V1 asset aliases) passed. `git diff --check`
@@ -193,6 +193,34 @@ malformed partitions. These are behavioral regression tests, not an empirical
 translation-accuracy score.
 
 Final deployment and hosted-photo measurements are recorded after release checks.
+
+The last guards additionally withhold a graduation document missing its explicit
+expected-graduation alternative or interview stage, detached expense noun phrases
+misclassified as restrictions, and bare date/time/question-count cells lacking
+event context. Complete source-grounded alternatives and contextual schedules
+remain eligible. A missing printed phrase spanning OCR lines now implicates only
+its located source units; the whole-page fallback remains when location cannot be
+established.
+
+Predeployment runtime with required verdict maps returned HTTP 200 for the
+retained primary photo (original OCR 36.951 s; translation 2.646 s; semantic
+57.322 s; reported total 97.339 s; four calls / 28,126 tokens) and positioned KCCI
+OCR (backend wall 71.027 s; five calls / 37,528 tokens; reported total 97.708 s
+includes earlier 26.962 s OCR). The primary retained the student-selected topic,
+card-payment instruction and email but still lacked complete research-topic and
+funding relationships. KCCI retained all six score pairs but incompletely
+expressed preferences, documents and selection stages. The reviewer gave both
+runs structurally valid but semantically overconfident verdicts; local proof
+correctly preserved a partial status. Required keys fix bookkeeping, not truth.
+
+After the last guards, an **offline deterministic replay**, injecting all-positive
+verdicts and making no OCR/provider requests, removed the observed contradictory
+document/expense/bare-cell output. Located missing phrases reduced the earlier
+blanket source-gap counts from 61 to 37 for the primary and 98 to 52 for KCCI.
+This is guard verification, not another empirical translation run. Two preceding
+local requests failed because the temporary diagnostic wrapper did not accept a
+new keyword; the wrapper was fixed outside the repository. Those instrumentation
+failures are retained separately and are not successful product runs.
 
 ## Remaining limits
 

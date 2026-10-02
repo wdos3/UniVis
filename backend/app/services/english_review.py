@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from app.models import NoticeData, ReviewState
-from app.services.coverage import audit_coverage, display_text
+from app.models import DocumentRequirement, NoticeData, ReviewState
+from app.services.coverage import CoverageUnit, audit_coverage, display_text, literal_source_unit_ids
 from app.services.english_literals import (
     missing_english_literals, missing_source_conditions, missing_source_values, missing_spending_rules,
     unsupported_currency_amounts, unsupported_source_dates,
@@ -34,6 +34,41 @@ _BARE_ENGLISH_SCHEDULE = re.compile(
     re.IGNORECASE,
 )
 _EXPANDED_ONLINE_SCOPE = re.compile(r"\b(?:entire|all|every)\b", re.IGNORECASE)
+_EXPENSE_NOUN_FRAGMENT = re.compile(r"(?:비용|항목|경비|지출|소요비|재료비|구입비|인쇄비)[\s.,:：]*$")
+_SOURCE_RESTRICTION_MODALITY = re.compile(r"금지|불가|불허|제한|안\s*됨|않|못|사용\s*가능|사용\s*할\s*수")
+_EXPECTED_GRADUATION_SOURCE = re.compile(r"졸업\s*(?:[（(]\s*예정\s*[)）]|예정)")
+_GRADUATION_ALTERNATIVE_SOURCE = re.compile(r"졸업\s*[（(]\s*예정\s*[)）]")
+_GRADUATION_DOCUMENT_ENGLISH = re.compile(r"\b(?:graduat\w*|degree)\b", re.IGNORECASE)
+_DOCUMENT_NOUN = re.compile(r"증명서|성적표|자격증|동의서|지원서|신청서|계획서")
+_EXPECTED_GRADUATION_ENGLISH = re.compile(
+    r"\b(?:expected|anticipated|prospective|pending|scheduled|upcoming)\b[\s()-]*graduat\w*\b|"
+    r"\bgraduat\w*[\s/-]*(?:\([^)]*)?(?:expected|anticipated|prospective|pending|scheduled|upcoming)\b",
+    re.IGNORECASE,
+)
+_GRADUATION_ALTERNATIVE_ENGLISH = re.compile(
+    r"\bor\b|/|\b(?:including|either|also)\b|\bgraduat\w*\s*\(", re.IGNORECASE,
+)
+_INTERVIEW_DOCUMENT_PHASE = re.compile(r"면접(?:\s*전형)?\s*(전|후|시|때|단계|당일)")
+_INTERVIEW_SUBMISSION_ENGLISH = {
+    "전": re.compile(r"\bbefore\b[^.;\n]{0,40}\binterviews?\b", re.IGNORECASE),
+    "후": re.compile(r"\bafter\b[^.;\n]{0,40}\binterviews?\b", re.IGNORECASE),
+    "시": re.compile(
+        r"\b(?:during|at|for)\b[^.;\n]{0,40}\binterviews?\b|\binterviews?[\s-]+(?:stage|phase|process)\b",
+        re.IGNORECASE,
+    ),
+}
+_BARE_QUESTION_COUNT = re.compile(r"(?:약\s*|총\s*)?\d+\s*(?:문항|문제)(?:\s*(?:내외|정도|이내|이상))?")
+_ENGLISH_MONTH = r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+_ENGLISH_DATE = (
+    rf"(?:{_ENGLISH_MONTH}\s+\d{{1,2}}(?:st|nd|rd|th)?(?:,?\s+\d{{4}})?|"
+    rf"\d{{1,2}}\s+{_ENGLISH_MONTH}(?:\s+\d{{4}})?|\d{{1,4}}[-./]\d{{1,2}}(?:[-./]\d{{1,4}})?)"
+)
+_ENGLISH_TIME = r"(?:\d{1,2}:\d{2}(?:\s*(?:am|pm))?|\d{1,2}\s*(?:am|pm)|morning|afternoon|evening|noon|midnight)"
+_BARE_ENGLISH_DATE_TIME = re.compile(
+    rf"(?:{_ENGLISH_DATE}(?:\s*\((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)?\))?"
+    rf"(?:[\s,]+(?:at\s+)?{_ENGLISH_TIME})?|{_ENGLISH_TIME})\.?",
+    re.IGNORECASE,
+)
 
 
 def _unassociated_source_fragment(field: EnglishSupportField) -> bool:
@@ -50,6 +85,20 @@ def _unassociated_source_fragment(field: EnglishSupportField) -> bool:
     if len(lines) != 1:
         return False
     source = lines[0]
+    if _BARE_QUESTION_COUNT.fullmatch(source):
+        return True
+    if (
+        field.field == "key_details" and field.label.casefold() in _GENERIC_DETAIL_LABELS | {"schedule"}
+        and _BARE_ENGLISH_DATE_TIME.fullmatch(field.text.strip())
+    ):
+        return True
+    if (
+        field.label.casefold() == "restriction" and _EXPENSE_NOUN_FRAGMENT.search(source)
+        and not _SOURCE_RESTRICTION_MODALITY.search(source)
+    ):
+        # A detached expense category cannot establish a prohibition or its
+        # funding recipient. A complete spending rule remains reviewable.
+        return True
     if (
         field.field == "key_details" and field.label.casefold() in _GENERIC_DETAIL_LABELS
         and not _KOREAN.search(source) and len(source) <= 12
@@ -88,12 +137,56 @@ class EnglishNoticeReview:
     has_verification_gaps: bool = False
 
 
+def _document_contexts(item: DocumentRequirement, units: list[CoverageUnit]) -> list[str]:
+    """Recover a shortened document quote's own source line, without crossing pages."""
+    evidence = re.sub(r"\s+", "", item.source_evidence)
+    if not evidence:
+        return []
+    matching = [
+        unit.text for unit in units
+        if (item.source_page is None or unit.page == item.source_page)
+        and evidence in re.sub(r"\s+", "", unit.text)
+    ]
+    return list(dict.fromkeys([item.source_evidence, *matching]))
+
+
+def _document_omits_source_condition(item: DocumentRequirement, units: list[CoverageUnit]) -> bool:
+    english = display_text(item)
+    graduation_document = bool(
+        _GRADUATION_DOCUMENT_ENGLISH.search(item.name)
+        or (_EXPECTED_GRADUATION_SOURCE.search(item.source_evidence) and len(_DOCUMENT_NOUN.findall(item.source_evidence)) == 1)
+    )
+    for source in _document_contexts(item, units):
+        # A shared document-list quotation does not make a transcript another
+        # graduation certificate. Only check the relevant document's alternative.
+        if graduation_document and _EXPECTED_GRADUATION_SOURCE.search(source):
+            if not _EXPECTED_GRADUATION_ENGLISH.search(english):
+                return True
+            if _GRADUATION_ALTERNATIVE_SOURCE.search(source) and not _GRADUATION_ALTERNATIVE_ENGLISH.search(english):
+                return True
+        if not re.search(r"제출|지참", source):
+            continue
+        for match in _INTERVIEW_DOCUMENT_PHASE.finditer(source):
+            phase = match.group(1)
+            required_phase = _INTERVIEW_SUBMISSION_ENGLISH[phase if phase in {"전", "후"} else "시"]
+            if not required_phase.search(english):
+                return True
+    return False
+
+
 def _prepare_review_notice(notice: NoticeData, source_text: str) -> tuple[NoticeData, bool]:
     """Resolve local presentation rules before certifying the displayed meaning."""
     prepared = notice.model_copy(deep=True)
     prepared.ambiguities = []
     prepared.unverified_items = []
     structural_gaps = False
+    source_units = audit_coverage(prepared, source_text).units
+    documents = [
+        item for item in prepared.required_documents if not _document_omits_source_condition(item, source_units)
+    ]
+    if len(documents) != len(prepared.required_documents):
+        prepared.required_documents = documents
+        structural_gaps = True
     for action in prepared.actions:
         if action.required_items and not _DOCUMENT_CITATION.search(action.source_evidence):
             # An application quote alone cannot place interview documents in
@@ -246,8 +339,9 @@ async def review_notice_english(
         page_units.setdefault(unit.page, []).append(unit)
     digest = simplified_text(reviewed)
     for units in page_units.values():
-        if missing_english_literals("\n".join(unit.text for unit in units), digest):
-            verified_ids.difference_update(unit.id for unit in units)
+        for phrase in missing_english_literals("\n".join(unit.text for unit in units), digest):
+            implicated = literal_source_unit_ids(phrase, units)
+            verified_ids.difference_update(implicated or {unit.id for unit in units})
     unverified_ids = {unit.id for unit in source_audit.units} - verified_ids
     if unverified_ids:
         if failure:

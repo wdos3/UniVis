@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from app import main
-from app.models import Action, Deadline, LabeledFact, NoticeData, SourceFact
+from app.models import Action, Deadline, DocumentRequirement, LabeledFact, NoticeData, SourceFact
 from app.services import english_review
 from app.services.coverage_repair import CoverageRepairResult
 from app.services.english_verification import (
@@ -313,10 +313,11 @@ def test_changed_protected_phrase_is_withheld_before_source_verification(monkeyp
 
 
 def test_protected_phrase_across_source_lines_must_survive_in_english(monkeypatch):
-    source = "과제 (Minimum Value\nPrototyping)"
+    source = "과제 (Minimum Value\nPrototyping)\n신청서 제출"
     notice = NoticeData(key_details=[
         LabeledFact(text="Minimum viable", label="Topic", source_evidence=source.splitlines()[0]),
         LabeledFact(text="Prototyping", label="Topic", source_evidence=source.splitlines()[1]),
+        LabeledFact(text="Submit the application form.", label="Application", source_evidence=source.splitlines()[2]),
     ])
 
     async def approve(fields, *args, **kwargs):
@@ -328,6 +329,7 @@ def test_protected_phrase_across_source_lines_must_survive_in_english(monkeypatc
     monkeypatch.setattr(english_review, "verify_english_support", approve)
     result = asyncio.run(english_review.review_notice_english(notice, source))
     assert result.has_verification_gaps and result.unverified_source_units == 2
+    assert any(item.text == "Submit the application form." for item in result.notice.key_details)
 
 
 def test_shared_quotation_preserves_independent_deadline_and_literal_topic(monkeypatch):
@@ -413,3 +415,135 @@ def test_final_verified_candidate_clears_previous_audit_gap_without_publishing_e
     result = asyncio.run(main._complete_english_coverage(pipeline, allow_partial=True))
     assert result.notice.actions[0].action == "Submit the form."
     assert result.english_coverage_status == "audited" and result.unverified_source_units == 0
+
+
+@pytest.mark.parametrize("name,condition", [
+    ("Graduation Certificate", ""),
+    ("Degree certificate", "Submit during the interview."),
+    ("Expected graduation certificate", "Submit at the interview."),
+    ("Graduation or expected graduation certificate", ""),
+])
+def test_document_omitted_alternative_or_interview_stage_is_withheld_before_review(monkeypatch, name, condition):
+    source = "졸업(예정)증명서, 성적증명서는 면접전형 시 제출"
+    notice = NoticeData(required_documents=[DocumentRequirement(
+        name=name, condition=condition, source_evidence="졸업(예정)증명서", source_page=1,
+    )])
+
+    async def unexpected(*args, **kwargs):
+        pytest.fail("The incomplete document field must not reach semantic certification.")
+
+    monkeypatch.setattr(english_review, "verify_english_support", unexpected)
+    result = asyncio.run(english_review.review_notice_english(notice, source))
+    assert result.notice.required_documents == []
+    assert result.has_verification_gaps
+    assert notice.required_documents[0].name == name
+
+
+def test_document_alternatives_and_stages_survive_without_contaminating_other_documents(monkeypatch):
+    source = "졸업(예정)증명서, 성적증명서는 면접전형 시 제출\n졸업증명서는 신청 시 제출"
+    notice = NoticeData(required_documents=[
+        DocumentRequirement(name="Graduation or expected graduation certificate", condition="Submit during the interview process.",
+                            source_evidence="졸업(예정)증명서", source_page=1),
+        DocumentRequirement(name="Transcript", condition="Submit at the interview.", source_evidence=source.splitlines()[0], source_page=1),
+        DocumentRequirement(name="Graduation certificate", condition="Submit with the application.", source_evidence=source.splitlines()[1], source_page=1),
+    ])
+
+    async def approve(fields, *args, **kwargs):
+        assert len(fields) == 3
+        return EnglishSupportResult(decisions=tuple(
+            EnglishSupportDecision(id=field.id, status="supported", reason="") for field in fields
+        ), requests=1, fully_covered_source_ids=frozenset(unit.id for unit in kwargs["source_units"]),
+           source_partition_complete=True)
+
+    monkeypatch.setattr(english_review, "verify_english_support", approve)
+    result = asyncio.run(english_review.review_notice_english(notice, source))
+    assert len(result.notice.required_documents) == 3
+
+
+def test_document_stage_context_does_not_cross_pages(monkeypatch):
+    source = "[Page 1]\n신청 시 성적증명서 제출\n[Page 2]\n성적증명서는 면접 시 제출"
+    notice = NoticeData(required_documents=[DocumentRequirement(
+        name="Transcript", condition="Submit with the application.", source_evidence="성적증명서", source_page=1,
+    )])
+
+    async def approve(fields, *args, **kwargs):
+        assert len(fields) == 1
+        return EnglishSupportResult(decisions=tuple(
+            EnglishSupportDecision(id=field.id, status="supported", reason="") for field in fields
+        ), requests=1)
+
+    monkeypatch.setattr(english_review, "verify_english_support", approve)
+    result = asyncio.run(english_review.review_notice_english(notice, source))
+    assert len(result.notice.required_documents) == 1
+
+
+@pytest.mark.parametrize("source,condition,kept", [
+    ("신분증은 면접 전 제출", "Submit before the interview.", True),
+    ("신분증은 면접 후 제출", "Submit after the interview.", True),
+    ("신분증은 면접 전 제출", "Submit during the interview.", False),
+    ("신분증은 면접 후 제출", "Submit before the interview.", False),
+])
+def test_document_interview_timing_preserves_before_and_after(source, condition, kept):
+    notice = NoticeData(required_documents=[DocumentRequirement(name="Identity document", condition=condition, source_evidence=source)])
+    prepared, gaps = english_review._prepare_review_notice(notice, source)
+    assert bool(prepared.required_documents) is kept
+    assert gaps is not kept
+
+
+def test_expense_noun_fragment_cannot_become_a_restriction(monkeypatch):
+    source = "교통비를 제외한 숙박 비용\n지원금은 인쇄비에만 사용 가능\n인쇄비 외 사용 금지"
+    notice = NoticeData(key_details=[
+        LabeledFact(text="Accommodation costs excluding transportation.", label="Restriction", source_evidence=source.splitlines()[0]),
+        LabeledFact(text="Funding can be used only for printing expenses.", label="Restriction", source_evidence=source.splitlines()[1]),
+        LabeledFact(text="Use for costs other than printing is prohibited.", label="Restriction", source_evidence=source.splitlines()[2]),
+    ])
+
+    async def approve(fields, *args, **kwargs):
+        assert len(fields) == 2 and all("Accommodation" not in field.text for field in fields)
+        return EnglishSupportResult(decisions=tuple(
+            EnglishSupportDecision(id=field.id, status="supported", reason="") for field in fields
+        ), requests=1)
+
+    monkeypatch.setattr(english_review, "verify_english_support", approve)
+    result = asyncio.run(english_review.review_notice_english(notice, source))
+    assert [item.text for item in result.notice.key_details] == [item.text for item in notice.key_details[1:]]
+
+
+@pytest.mark.parametrize("source,text,label", [
+    ("4.16(수) 오후", "April 16 (Wed), afternoon.", "Additional detail"),
+    ("2033.08.12", "August 12, 2033", "Schedule"),
+    ("14:30", "14:30", "Additional detail"),
+    ("오후 2시", "2 PM", "Schedule"),
+    ("7문항 내외", "Approximately 7 questions", "Additional detail"),
+    ("총 5문제", "5 questions in total", "Additional detail"),
+])
+def test_detached_date_time_and_question_cells_are_withheld(monkeypatch, source, text, label):
+    notice = NoticeData(key_details=[LabeledFact(text=text, label=label, source_evidence=source)])
+
+    async def approve(fields, *args, **kwargs):
+        assert fields == []
+        return EnglishSupportResult(decisions=(), requests=0,
+                                   unverified_source_ids=frozenset(unit.id for unit in kwargs["source_units"]))
+
+    monkeypatch.setattr(english_review, "verify_english_support", approve)
+    result = asyncio.run(english_review.review_notice_english(notice, source))
+    assert result.notice.key_details == [] and result.has_verification_gaps
+
+
+def test_complete_exam_event_and_named_schedule_remain_reviewable(monkeypatch):
+    source = "논술시험:2033.08.12오후,7문항내외\n면접일:2033.08.16오전10:00"
+    notice = NoticeData(key_details=[
+        LabeledFact(text="The essay exam is on August 12, 2033, in the afternoon, with approximately 7 questions.",
+                    label="Schedule", source_evidence=source.splitlines()[0]),
+        LabeledFact(text="August 16, 2033, at 10:00 AM", label="Interview date", source_evidence=source.splitlines()[1]),
+    ])
+
+    async def approve(fields, *args, **kwargs):
+        assert len(fields) == 2
+        return EnglishSupportResult(decisions=tuple(
+            EnglishSupportDecision(id=field.id, status="supported", reason="") for field in fields
+        ), requests=1)
+
+    monkeypatch.setattr(english_review, "verify_english_support", approve)
+    result = asyncio.run(english_review.review_notice_english(notice, source))
+    assert len(result.notice.key_details) == 2

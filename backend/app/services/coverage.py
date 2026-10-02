@@ -146,3 +146,19 @@ def audit_coverage(notice: NoticeData, source_text: str) -> CoverageAudit:
         covered_count=len(units) - len(uncovered),
         cited_english_by_unit=cited_english_by_unit,
     )
+
+
+def literal_source_unit_ids(phrase: str, units: list[CoverageUnit]) -> set[str]:
+    """Locate a printed English phrase across source units without guessing meaning."""
+    expected = re.findall(r"[A-Za-z][A-Za-z0-9]*", phrase.casefold())
+    if not expected:
+        return set()
+    words = [
+        (word, unit.id) for unit in units
+        for word in re.findall(r"[A-Za-z][A-Za-z0-9]*", unit.text.casefold())
+    ]
+    return {
+        unit_id for index in range(len(words) - len(expected) + 1)
+        if [word for word, _ in words[index:index + len(expected)]] == expected
+        for _, unit_id in words[index:index + len(expected)]
+    }

@@ -11,7 +11,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import GroundedItem, LabeledFact, NoticeData, ReviewState, SourceFact
-from app.services.coverage import CoverageUnit, audit_coverage, display_text
+from app.services.coverage import CoverageUnit, audit_coverage, display_text, literal_source_unit_ids
 from app.services.coverage_coalescing import LABELED_FIELDS, coalesce_exact_repair_duplicates
 from app.services.english_literals import (
     missing_english_literals, missing_source_conditions, missing_source_values, missing_spending_rules,
@@ -531,20 +531,6 @@ def _validate_partial_response(
     return validated, decorative_count, unverified
 
 
-def _literal_source_ids(phrase: str, units: list[CoverageUnit]) -> set[str]:
-    """Find the source lines forming a protected phrase, including line breaks."""
-    expected = re.findall(r"[A-Za-z][A-Za-z0-9]*", phrase.casefold())
-    words = [
-        (word, unit.id) for unit in units
-        for word in re.findall(r"[A-Za-z][A-Za-z0-9]*", unit.text.casefold())
-    ]
-    return {
-        unit_id for index in range(len(words) - len(expected) + 1)
-        if [word for word, _ in words[index:index + len(expected)]] == expected
-        for _, unit_id in words[index:index + len(expected)]
-    }
-
-
 def _unsafe_generated_item(field: str, item: GroundedItem, source_text: str) -> bool:
     text = display_text(item)
     return bool(
@@ -664,7 +650,7 @@ def _partial_notice(
         for page_units in units_by_page.values():
             missing = missing_english_literals("\n".join(unit.text for unit in page_units), digest)
             for phrase in missing:
-                implicated = _literal_source_ids(phrase, page_units)
+                implicated = literal_source_unit_ids(phrase, page_units)
                 # The protected phrase came from this page. If its token
                 # locations cannot be recovered, withhold the whole page.
                 unverified.update(implicated or {unit.id for unit in page_units})
