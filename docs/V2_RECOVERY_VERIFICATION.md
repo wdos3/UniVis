@@ -8,8 +8,12 @@ This report records checks of the existing Version 2 implementation on
 verification record, not a claim that OCR or semantic interpretation has no omissions.
 The final hosted release and measurements are recorded in the table and final results
 below. The intervening local comparison is retained as historical evidence, explicitly
-separate from the final hosted responses. The primary creative-convergence and KCCI
-source photos were unavailable.
+separate from the final hosted responses. Availability correction: the earlier search missed the KCCI original in stored
+uploads. The user subsequently supplied a folder containing five real photos,
+including both primary regressions. Historical "unavailable" rows below describe
+that earlier incomplete search, not the current inventory. See
+[V2_GENERALIZATION_VERIFICATION.md](V2_GENERALIZATION_VERIFICATION.md) for the
+current broader implementation and photo checks.
 
 ## Final verification record
 

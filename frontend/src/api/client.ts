@@ -79,7 +79,7 @@ export const api = {
   ) => request<AnalysisResult>('/api/analyze-client-ocr', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ pages, ocr_latency_ms: ocrLatencyMs, input_type: inputType, provider, target_language: 'en' }),
+    body: JSON.stringify({ pages, ocr_latency_ms: ocrLatencyMs, input_type: inputType, provider, target_language: 'en', allow_partial: true }),
   }),
   notices: () => request<AnalysisResult[]>('/api/notices'),
   updateNotice: (id: string, notice: NoticeData) => request<AnalysisResult>(`/api/notices/${id}`, {

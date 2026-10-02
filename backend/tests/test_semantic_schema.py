@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from openai.lib._pydantic import to_strict_json_schema
 
 from app.models import NoticeData
-from app.services.semantic import OpenAISemanticProvider, _SemanticNotice, normalize_notice
+from app.services.semantic import OpenAISemanticProvider, _PhotoSemanticNotice, _SemanticNotice, normalize_notice
 
 
 def test_model_schema_omits_application_metadata_but_keeps_semantics_and_evidence() -> None:
@@ -63,3 +63,44 @@ def test_repeated_source_quote_on_multiple_pages_gets_no_guessed_page() -> None:
     })
     normalized = normalize_notice(notice, source_text="[Page 1]\n학부생 지원 가능\n[Page 2]\n학부생 지원 가능")
     assert normalized.eligibility[0].source_page is None
+
+
+def test_photo_semantics_assigns_exact_evidence_ids_locally_and_omits_noisy_baseline() -> None:
+    source = "[Page 1]\n장학금: 1인당 최대 30만원"
+    payload = {"financial_support": [{"text": "Scholarship: up to KRW 300,000 per person.", "source_evidence": "장학금: 1인당 최대 30만원"}]}
+
+    class Responses:
+        async def parse(self, *, text_format, input, **kwargs):
+            assert text_format is _PhotoSemanticNotice
+            schema = to_strict_json_schema(text_format)
+            assert "source_facts" not in schema["properties"]
+            assert "source_fact_ids" not in schema["$defs"]["LabeledFact"]["properties"]
+            assert "source_evidence" in schema["$defs"]["LabeledFact"]["properties"]
+            assert "Noisy translation invents a fee" not in input[1]["content"]
+            return SimpleNamespace(output_parsed=text_format.model_validate(payload), usage=None)
+
+    result = asyncio.run(OpenAISemanticProvider(client=SimpleNamespace(responses=Responses())).analyze(
+        source, "Noisy translation invents a fee", "en", allow_partial=True,
+    ))
+    item = result.notice.financial_support[0]
+    assert item.source_fact_ids == ["F001"]
+    assert result.notice.source_facts[0].source_text == item.source_evidence
+    assert item.source_page == 1 and result.notice.fees == []
+    assert item.text == payload["financial_support"][0]["text"]
+
+
+def test_compact_photo_documents_share_quoted_evidence_and_expand_to_checklist_items():
+    source = "신청서와 증명서 제출"
+    payload = {
+        "actions": [{"step": 1, "action": "Submit documents.", "required_items": ["Application form", "Certificate"], "source_evidence": source}],
+        "required_documents": [{"name": "Application form and certificate", "source_evidence": source}],
+    }
+
+    class Responses:
+        async def parse(self, *, text_format, **kwargs):
+            return SimpleNamespace(output_parsed=text_format.model_validate(payload), usage=None)
+
+    result = asyncio.run(OpenAISemanticProvider(client=SimpleNamespace(responses=Responses())).analyze(source, "", "en", allow_partial=True))
+    assert [item.name for item in result.notice.required_documents] == ["Application form", "Certificate"]
+    assert len(result.notice.source_facts) == 1
+    assert all(item.source_fact_ids == ["F001"] for item in result.notice.required_documents)

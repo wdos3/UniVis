@@ -9,7 +9,7 @@ import pytest
 
 from app.models import Contact, NoticeData, ReviewState
 from app.services.semantic import OpenAISemanticProvider, SourceCorrectionRequired, normalize_notice
-from app.services.source_contacts import contact_corrections, unsupported_contacts
+from app.services.source_contacts import contact_corrections, email_values, phone_values, unsupported_contacts
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -73,3 +73,41 @@ def test_semantic_email_without_matching_source_evidence_is_cleared() -> None:
     assert contact.email == ""
     assert contact.state == ReviewState.NEEDS_REVIEW
     assert "Email address does not match" in contact.details
+
+
+@pytest.mark.parametrize("source", [
+    "PDF 파일을 grants@example.edu로 제출",
+    "문의grants@example.edu에게 연락",
+    "grants@example.edu(장학팀)",
+])
+def test_korean_labels_and_particles_do_not_hide_printed_email(source: str) -> None:
+    assert email_values(source) == {"grants@example.edu"}
+    assert unsupported_contacts(source, "Send documents to grants@example.edu.") == []
+
+
+@pytest.mark.parametrize("source", ["grants@example.edu9", "grants@example.edu_", "grants@example.edu@other.org",
+                                     "grants@example.edu.au2", "grants@example.edu.au-z"])
+def test_email_does_not_accept_a_partial_latin_address(source: str) -> None:
+    assert "grants@example.edu" not in email_values(source)
+
+
+@pytest.mark.parametrize("source", ["문의02-123-4567로 연락", "02-123-4567에 전화", "전화(+82 2-123-4567)"])
+def test_korean_labels_and_particles_do_not_hide_phone_digits(source: str) -> None:
+    assert "021234567" in phone_values(source)
+    assert unsupported_contacts(source, "Call 02-123-4567.") == []
+
+
+def test_damaged_contact_with_korean_particle_still_requires_correction() -> None:
+    corrections = contact_corrections("문의02-123-45O7로 연락")
+    assert len(corrections) == 1
+    assert "02-123-45O7" in corrections[0]["reason"]
+
+
+@pytest.mark.parametrize("source", ["총사업비1000000000원", "문서번호1234567890", "2026090712", "예산1.000.000.000원"])
+def test_long_numbers_without_contact_shape_or_cue_are_not_phones(source: str) -> None:
+    assert phone_values(source) == {}
+
+
+@pytest.mark.parametrize("source", ["전화1234567890", "문의021234567로 연락"])
+def test_explicit_bare_phone_numbers_remain_available(source: str) -> None:
+    assert phone_values(source)

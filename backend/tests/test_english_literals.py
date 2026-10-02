@@ -5,9 +5,33 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.models import NoticeData
+from app.models import Deadline, LabeledFact, NoticeData
 from app.services.coverage_repair import CoverageProviderError, RepairDetail, RepairResponse, repair_coverage
-from app.services.english_literals import missing_english_literals, missing_source_conditions, missing_source_values
+from app.services.english_literals import missing_english_literals, missing_source_conditions, missing_source_values, missing_spending_rules, unsupported_currency_amounts
+from app.services.text import simplified_text
+
+
+@pytest.mark.parametrize("source", ["행정실에 방문하여 카드결제", "교육원 방문 후 카드 결제 진행"])
+def test_prescribed_payment_procedure_cannot_be_softened_to_optional(source):
+    assert "prescribed in-person card-payment procedure" in missing_spending_rules(
+        source, "Participants can visit the office and pay by card.",
+    )
+    assert missing_spending_rules(source, "Visit the office and pay by card.") == []
+
+
+def test_source_optional_card_procedure_remains_optional():
+    assert missing_spending_rules("교육원 방문 후 카드 결제 가능", "Participants may visit and pay by card.") == []
+
+
+@pytest.mark.parametrize("english", ["Win KRW 5,000.", "Win 5,000 won.", "Win 5,000 KRW."])
+def test_amount_elsewhere_cannot_be_invented_from_a_heading_quote(english):
+    assert unsupported_currency_amounts("만족도 조사", english) == ["KRW 5,000"]
+    assert unsupported_currency_amounts("상품권 5천원 증정", english) == []
+
+
+def test_quoted_currency_amount_preserves_decimal_and_large_korean_units():
+    assert unsupported_currency_amounts("예산 1.5억원", "Budget: KRW 150,000,000.") == []
+    assert unsupported_currency_amounts("지원금 KRW 20,000", "Funding: 20,000 won.") == []
 
 
 @pytest.mark.parametrize("wording", ["receiving research supervision", "receiving research guidance"])
@@ -41,6 +65,53 @@ def test_source_value_guard(source: str, english: str, expected: list[str]) -> N
 
 
 @pytest.mark.parametrize(("source", "english", "expected"), [
+    ("접수기간: 2029.11.03(토)~11.28(수)18:00", "Applications close on November 3, 2029 at 18:00.", ["11-28"]),
+    ("접수기간: 2029.11.03(토)~11.28(수)18:00", "Apply from November 3 through November 28, 2029, closing at 18:00.", []),
+    ("3.02(월)~3.24(화)", "Applications open on March 2.", ["03-24"]),
+    ("3.02(월)~3.24(화)", "March 2 through March 24.", []),
+    ("4/05 ~ 4/22", "April 5 through April 22.", []),
+    ("4/05 ~ 4/22", "April 5.", ["04-22"]),
+    ("면접 11.20(금)", "The interview is November 21.", ["11-20"]),
+    ("납부 마감: 4.15", "Payment closes April 16.", ["04-15"]),
+    ("제품 가격: 3.20만원", "The product costs KRW 32,000.", []),
+    ("프로그램 버전 3.20~3.25", "Software versions are listed.", []),
+    ("연구 값 9.30", "Research values are listed.", []),
+])
+def test_abbreviated_dates_preserve_each_endpoint_without_inventing_calendar_context(
+    source: str, english: str, expected: list[str],
+) -> None:
+    assert missing_source_values(source, english) == expected
+
+
+@pytest.mark.parametrize("allow_partial", [False, True])
+def test_audited_abbreviated_range_supersedes_a_primary_that_ends_at_the_start_date(allow_partial: bool) -> None:
+    source = "접수기간: 2029.11.03(토)~11.28(수)18:00"
+    notice = NoticeData(deadlines=[Deadline(
+        date="2029-11-03", time="18:00", description="Application period ends.",
+        source_evidence=source, source_page=1,
+    )])
+    correct = "Apply from November 3 through November 28, 2029, closing at 18:00."
+    parsed = RepairResponse(
+        represented_unit_ids=[], details=[RepairDetail(
+            unit_ids=["P001-L0001"], text=correct, category="schedule", certain=True,
+        )], decorative=[], unresolved_unit_ids=[],
+    )
+
+    class Responses:
+        async def parse(self, **kwargs):
+            return SimpleNamespace(output_parsed=parsed, usage=None)
+
+    result = asyncio.run(repair_coverage(
+        notice, source, client=SimpleNamespace(responses=Responses()), allow_partial=allow_partial,
+    ))
+
+    assert result.notice.deadlines == []
+    assert correct in simplified_text(result.notice)
+    assert "Application period ends." not in simplified_text(result.notice)
+    assert result.has_verification_gaps is False
+
+
+@pytest.mark.parametrize(("source", "english", "expected"), [
     ("교내 타 프로그램에서 동일하거나 유사한 연구 주제로 지원을 받는 학생 및 팀은 참여 제한",
      "Students supported for similar topics in other programs are restricted from participation.",
      ["on-campus scope", "same topic"]),
@@ -64,13 +135,82 @@ def test_source_value_guard(source: str, english: str, expected: list[str]) -> N
     ("연구비: 1인당 최대 20만원", "Research funding: up to KRW 200,000 for each participant.", []),
     ("장학금 형태로 지급", "Paid as an allowance.", ["scholarship payment"]),
     ("장학금 형태로 지급", "Paid as a scholarship.", []),
-    ("프로그램 내 중복 참여 불허", "Duplicate participation is possible.", ["not allowed"]),
-    ("프로그램 내 중복 참여 불허", "No duplicate participation is permitted.", []),
+    ("프로그램 내 중복 참여 불허", "Duplicate participation is possible.", ["duplicate participation within the same program", "not allowed"]),
+    ("프로그램 내 중복 참여 불허", "No duplicate participation within this program is permitted.", []),
+    ("프로그램 내 중복참여 불허", "Participation in multiple programs is not allowed.", ["duplicate participation within the same program"]),
+    ("이 프로그램 내 중복 신청 불허", "Duplicate applications for this program are not permitted.", []),
     ("활동비 지원 대상에서는 제외", "Eligible for activity support.", ["exclusion from support"]),
     ("활동비 지원 대상에서는 제외", "Not eligible for activity support.", []),
 ])
 def test_narrow_conditions_guard(source: str, english: str, expected: list[str]) -> None:
     assert missing_source_conditions(source, english) == expected
+
+
+@pytest.mark.parametrize(("source", "incomplete", "complete", "order"), [
+    (
+        "보조금은 2차에 걸쳐 지급하며 확인서를 제출한 사람에 한하여 2차 보조금 지급",
+        "The subsidy is paid in two installments, contingent on filing confirmation.",
+        "The subsidy is paid in two installments; only people filing confirmation receive the second installment.",
+        2,
+    ),
+    (
+        "1차 장학금 15만원, 2차 장학금 25만원은 승인 후 지급",
+        "Scholarship payments of KRW 150,000 and KRW 250,000 require approval.",
+        "The first scholarship payment is KRW 150,000; the second payment of KRW 250,000 is paid after approval.",
+        2,
+    ),
+    (
+        "자료 검증 후 3회차 지급",
+        "Three payments are made following document verification.",
+        "Payment number 3 is made after document verification.",
+        3,
+    ),
+    (
+        "1번째 지급은 신청서를 확인한 경우에만 가능",
+        "All payments require application verification.",
+        "The 1st disbursement is made only after verifying the application.",
+        1,
+    ),
+])
+def test_payment_prerequisite_retains_its_specific_installment(
+    source: str, incomplete: str, complete: str, order: int,
+) -> None:
+    assert missing_source_conditions(source, incomplete) == [f"condition applying to installment {order}"]
+    assert missing_source_conditions(source, complete) == []
+
+
+@pytest.mark.parametrize("source", [
+    "보조금은 3차에 걸쳐 지급", "2차 지원금 지급 조건 없음", "확인서를 제출한 경우에만 참여 가능",
+])
+def test_payment_scope_guard_does_not_create_an_installment_condition(source: str) -> None:
+    assert missing_source_conditions(source, "The notice describes its support.") == []
+
+
+@pytest.mark.parametrize("allow_partial", [False, True])
+def test_complete_specific_installment_repair_removes_a_primary_conditioning_every_payment(allow_partial: bool) -> None:
+    source = "보조금은 3차에 걸쳐 지급하며 주소를 검증한 경우에만 3차 보조금 지급"
+    incomplete = "The housing subsidy is paid in three installments after address verification."
+    complete = "The subsidy is paid in three installments; only the third installment requires address verification."
+    notice = NoticeData(financial_support=[LabeledFact(
+        text=incomplete, source_evidence=source, source_page=1,
+    )])
+    parsed = RepairResponse(
+        represented_unit_ids=[], details=[RepairDetail(
+            unit_ids=["P001-L0001"], text=complete, category="funding", certain=True,
+        )], decorative=[], unresolved_unit_ids=[],
+    )
+
+    class Responses:
+        async def parse(self, **kwargs):
+            return SimpleNamespace(output_parsed=parsed, usage=None)
+
+    result = asyncio.run(repair_coverage(
+        notice, source, client=SimpleNamespace(responses=Responses()), allow_partial=allow_partial,
+    ))
+
+    assert [item.text for item in result.notice.financial_support] == [complete]
+    assert incomplete not in simplified_text(result.notice)
+    assert result.has_verification_gaps is False
 
 
 def test_preserves_the_posters_exact_mvp_expansion() -> None:

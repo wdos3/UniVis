@@ -6,7 +6,7 @@ Version 2 separates the notice pipeline into three replaceable portions:
 2. MyMemory provides temporary no-key translation (or a configured LibreTranslate instance can replace it);
 3. OpenAI extracts typed notice facts from the Korean source and translation, then checks the English output for omitted source details. React renders the result deterministically.
 
-An analysis can make several OpenAI calls: initial structured extraction, one or more English-field repair calls when needed, a source-line completeness audit, and possibly a targeted audit retry. The response records translation requests, semantic requests, and aggregate input/output/total token usage. Version 1 remains unchanged in `../visnotice` apart from its explicit Version 1 branding.
+An analysis can make several OpenAI calls: initial structured extraction, English-field repair when needed, a source-line completeness audit, possibly a targeted audit retry, and a bounded final English support check for photos. Photo extraction assigns fact IDs locally from exact quotations and interprets Korean directly; MyMemory remains a separate baseline. The response records stage timings, request counts, and available token usage. Version 1 remains unchanged in `../visnotice` apart from its explicit Version 1 branding.
 
 **Visualizing Korean University Notices for International Students**
 
@@ -21,7 +21,7 @@ It is designed to test whether visualization helps international students identi
 ## What works
 
 - rear-camera capture plus JPG, PNG, WEBP, text, and PDF upload (local Python/Docker image API also accepts HEIC/HEIF);
-- ordered multi-image previews, removal, and page reordering;
+- ordered same-notice image pages, removal/reordering, and a separate replacement upload for testing another notice;
 - EXIF correction, conservative enhancement, quality screening, QR detection, and image-PDF rendering;
 - PaddleOCR PP-OCRv5 Korean recognition for photographs and image-only PDFs in the local Python/Docker runtime;
 - browser-based PaddleOCR for camera and image uploads on the hosted site, with recognized text, bounded text positions, and any locally decoded QR web URLs sent to the application API rather than photo bytes;
@@ -30,10 +30,10 @@ It is designed to test whether visualization helps international students identi
 - selectable MyMemory or LibreTranslate adapter plus mock translation for demos;
 - translation chunking that keeps OCR paragraph/column boundaries and whole lines where the provider's byte limit permits;
 - strict Pydantic intermediate representation—models never generate React or HTML;
-- English-language field repair and a source-line completeness audit that can add grounded details or reject an uncertain result;
+- English-language field repair and source-line auditing with bounded retries; photo mode withholds uncertain claims and shows supported facts with explicit English verification gaps;
 - recorded OCR, translation, semantic, and total latency plus aggregate semantic request/token counts;
 - separate semantic extraction, English repair, and completeness-audit timings; device-side model preparation/detection/recognition and latest server-request timing for photos;
-- a browser-local lower-page detail pass for tall photographs, preserving differing readings and OCR confidence for correction instead of discarding uncertain text;
+- adaptive browser-local recovery for small or uncertain text, plus a lower-edge check on tall photos (at most two additional crops), retaining conflicting readings;
 - exact Korean evidence and source-fact IDs on important items;
 - deterministic visual-template selection;
 - five grounded text demos and seven generated image fixtures across six photo scenarios;
@@ -144,16 +144,16 @@ With no key, the app starts in mock mode and explains that arbitrary real notice
 
 1. Select **Take a Photo**, **Upload Image**, **Upload PDF**, or **Paste Korean text**.
 2. Preview image pages, add/remove pages, and put them in reading order.
-3. Select Auto, Mock, or OpenAI for the semantic step and analyze the notice.
+3. Use **Upload another notice** for an independent photo, or **Add another page** for another page of the current notice. Select Auto, Mock, or OpenAI for the semantic step and analyze the notice.
 4. For image input, inspect original pages and OCR-recovered Korean text. Local Python/Docker image analysis also reports quality warnings and QR results; the hosted browser route attempts QR URL decoding locally.
 5. Inspect Translation, Simplified Text, and Visual Instructions.
 6. Turn on **Show source evidence** to compare English items with Korean phrases, fact IDs, and source pages.
-7. If hosted photo analysis cannot verify a complete English digest, compare its recovered text with the photo, correct the OCR, and retry without rerunning OCR. In local development, **Researcher View** also supports structured-data/template corrections; that administrative control is not offered on the public website.
+7. Photo recovery and audit retries run automatically. The app opens English simplified text first. A **Partial interpretation** banner and English gaps identify withheld details. **Retry English interpretation** reuses the recognized text and positions without repeating OCR or requiring Korean transcription. Source editing is optional; local **Researcher View** also supports structured-data/template corrections.
 8. Use **Print / Save PDF** for a clean student-facing export.
 
 Image-only PDFs are rendered and processed by local Python/Docker OCR; the hosted
 site's browser OCR currently handles camera and image files, not image-only PDFs.
-An unreadable source is rejected instead of producing plausible instructions.
+An unreadable source yields an English unavailable state in photo mode. It does not produce plausible guessed instructions. Text/document APIs retain strict verification failures.
 
 ## Research Mode
 

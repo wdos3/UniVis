@@ -32,11 +32,13 @@ from app.models import (
 )
 from app.services.demos import DEMOS, get_demo, match_demo
 from app.services.fidelity import calculate_fidelity, select_templates
+from app.services.coverage import audit_coverage
 from app.services.coverage_repair import CoverageProviderError, CoverageRepairError, repair_coverage
+from app.services.english_review import EnglishNoticeReview, review_notice_english
 from app.services.extraction.reconciliation import add_page_provenance, split_recovered_pages
 from app.services.extraction.language_scores import (
     LanguageScoreError, add_aligned_language_scores, mark_unverified_language_scores,
-    validate_aligned_language_scores,
+    validate_aligned_language_scores, EXAM_NAME, EXAM_SUFFIX, EXAM_MENTION,
 )
 from app.services.image_demos import IMAGE_DEMOS
 from app.services.images.pdf_images import render_pdf_pages
@@ -47,6 +49,7 @@ from app.services.pipeline import PipelineResult, analyze_image_pipeline, analyz
 from app.services.public_access import limit_public_analysis, public_mode, require_admin
 from app.services.ocr import OcrError
 from app.services.semantic import SemanticError, SourceCorrectionRequired
+from app.services.source_contacts import contact_corrections
 from app.services.storage import (
     export_research_csv,
     get_notice,
@@ -102,12 +105,15 @@ def make_result(
 ) -> AnalysisResult:
     if validation_warnings:
         notice.unverified_items = list(dict.fromkeys(notice.unverified_items + validation_warnings))
+    digest = simplified_text(notice)
+    if acquisition and acquisition.english_coverage_status == "partial" and notice.unverified_items:
+        digest += "\n\nVerification gaps\n" + "\n".join(f"- {item}" for item in notice.unverified_items)
     return AnalysisResult(
         id=result_id or f"notice-{uuid4().hex}",
         created_at=created_at or datetime.now(UTC).isoformat(),
         original_text=original_text,
         faithful_translation=translation,
-        simplified_text=simplified_text(notice),
+        simplified_text=digest,
         notice=notice,
         templates=select_templates(notice),
         fidelity=calculate_fidelity(notice, original_text),
@@ -139,10 +145,10 @@ async def analyze(request: AnalyzeRequest) -> AnalysisResult:
     return result
 
 
-async def _run_text_pipeline(request: AnalyzeRequest, *, layout_context: str = "") -> PipelineResult:
+async def _run_text_pipeline(request: AnalyzeRequest, *, layout_context: str = "", allow_partial: bool = False) -> PipelineResult:
     try:
         return await analyze_text_pipeline(
-            request.text, request.target_language, request.provider, layout_context=layout_context
+            request.text, request.target_language, request.provider, layout_context=layout_context, allow_partial=allow_partial,
         )
     except SourceCorrectionRequired as exc:
         raise _source_correction_error(exc) from exc
@@ -163,14 +169,18 @@ def _source_correction_error(exc: Exception, *, message: str | None = None) -> H
     })
 
 
-async def _complete_english_coverage(pipeline: PipelineResult, *, layout_context: str = "") -> PipelineResult:
+async def _complete_english_coverage(
+    pipeline: PipelineResult, *, layout_context: str = "", allow_partial: bool = False,
+    unverified_source_texts: tuple[str, ...] = (),
+) -> PipelineResult:
     if not pipeline.semantic_provider.startswith("openai-semantic:") or pipeline.notice.target_language != "en":
         return pipeline
     started = perf_counter()
     try:
-        repair = await repair_coverage(
-            pipeline.notice, pipeline.source_text, layout_context=layout_context,
-        )
+        options = {"layout_context": layout_context}
+        if allow_partial:
+            options.update(allow_partial=True, unverified_source_texts=unverified_source_texts)
+        repair = await repair_coverage(pipeline.notice, pipeline.source_text, **options)
     except CoverageProviderError as exc:
         logger.warning("coverage_provider_failed reason=%s", type(exc).__name__)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -179,17 +189,28 @@ async def _complete_english_coverage(pipeline: PipelineResult, *, layout_context
         raise _source_correction_error(
             exc, message=f"A complete English interpretation could not be verified: {exc} Correct the listed source text and retry.",
         ) from exc
+    final_review = EnglishNoticeReview(notice=repair.notice)
+    review_started = perf_counter()
+    if allow_partial:
+        final_review = await review_notice_english(
+            repair.notice, pipeline.source_text, layout_context=layout_context, primary_notice_title=pipeline.notice.title,
+        )
     elapsed_ms = round((perf_counter() - started) * 1000)
+    verification_ms = round((perf_counter() - review_started) * 1000) if allow_partial else 0
     return replace(
         pipeline,
-        notice=repair.notice,
-        semantic_requests=pipeline.semantic_requests + repair.requests,
-        semantic_input_tokens=pipeline.semantic_input_tokens + repair.input_tokens,
-        semantic_output_tokens=pipeline.semantic_output_tokens + repair.output_tokens,
-        semantic_total_tokens=pipeline.semantic_total_tokens + repair.total_tokens,
+        notice=final_review.notice,
+        semantic_requests=pipeline.semantic_requests + repair.requests + final_review.requests,
+        semantic_input_tokens=pipeline.semantic_input_tokens + repair.input_tokens + final_review.input_tokens,
+        semantic_output_tokens=pipeline.semantic_output_tokens + repair.output_tokens + final_review.output_tokens,
+        semantic_total_tokens=pipeline.semantic_total_tokens + repair.total_tokens + final_review.total_tokens,
         semantic_latency_ms=pipeline.semantic_latency_ms + elapsed_ms,
-        coverage_latency_ms=elapsed_ms,
+        coverage_latency_ms=elapsed_ms - verification_ms,
+        english_verification_latency_ms=verification_ms,
         total_latency_ms=pipeline.total_latency_ms + elapsed_ms,
+        english_coverage_status="partial" if repair.has_verification_gaps or final_review.has_verification_gaps else "audited",
+        unverified_source_units=max(len(repair.unverified_units), final_review.unverified_source_units),
+        metrics_complete=pipeline.metrics_complete and repair.usage_complete and final_review.usage_complete,
     )
 
 
@@ -224,7 +245,11 @@ def _pipeline_acquisition(
         extraction_latency_ms=pipeline.extraction_latency_ms,
         english_repair_latency_ms=pipeline.english_repair_latency_ms,
         coverage_latency_ms=pipeline.coverage_latency_ms,
+        english_verification_latency_ms=pipeline.english_verification_latency_ms,
         total_latency_ms=pipeline.total_latency_ms,
+        english_coverage_status=pipeline.english_coverage_status,
+        unverified_source_units=pipeline.unverified_source_units,
+        metrics_complete=pipeline.metrics_complete,
     )
 
 
@@ -274,23 +299,55 @@ async def analyze_text(request: AnalyzeRequest) -> AnalysisResult:
 @app.post("/api/analyze-client-ocr", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])
 async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
     ordered_pages = [reorder_ocr_page_columns(page) for page in request.pages]
+    unverified_texts: list[str] = []
+    table_uncertain = False
     try:
         validate_aligned_language_scores(ordered_pages)
     except LanguageScoreError as exc:
-        raise _source_correction_error(exc) from exc
+        if not request.allow_partial:
+            raise _source_correction_error(exc) from exc
+        table_uncertain = True
+        unverified_texts.extend(str(item["text"]) for item in exc.corrections)
+        for page in ordered_pages:
+            if not EXAM_MENTION.search(page.text):
+                continue
+            unverified_texts.extend(
+                line.strip() for line in page.text.splitlines()
+                if EXAM_NAME.fullmatch(line.strip()) or EXAM_SUFFIX.fullmatch(line.strip())
+                or re.fullmatch(r"[A-Za-z0-9.() -]{1,16}\s*(?:점\s*)?이상", line.strip())
+            )
     page_texts = [page.text.strip() for page in ordered_pages]
     source_text = "\n\n".join(f"[Page {index}]\n{text}" for index, text in enumerate(page_texts, start=1))
+    if request.allow_partial:
+        unverified_texts.extend(item["text"] for item in contact_corrections(source_text))
     if len(re.findall(r"[가-힣]", source_text)) < 4:
+        if request.allow_partial and request.provider != "mock":
+            return _client_ocr_unverified_result(
+                request, page_texts, source_text,
+                "The image did not yield enough readable Korean to verify instructions. No dates, amounts, eligibility, or actions could be established. A closer, brighter photo of the notice can improve automatic reading; no Korean transcription is required.",
+                extraction_status="unavailable",
+            )
         raise HTTPException(
             status_code=422,
             detail="Browser OCR recovered too little Korean text. Retake the photo closer, brighter, and straight-on.",
         )
 
     layout_context = format_ocr_layout(ordered_pages)
-    pipeline = await _run_text_pipeline(
-        AnalyzeRequest(text=source_text, target_language=request.target_language, provider=request.provider),
-        layout_context=layout_context,
-    )
+    started = perf_counter()
+    try:
+        pipeline = await _run_text_pipeline(
+            AnalyzeRequest(text=source_text, target_language=request.target_language, provider=request.provider),
+            layout_context=layout_context,
+            allow_partial=request.allow_partial,
+        )
+    except HTTPException as exc:
+        if not request.allow_partial or exc.status_code < 500:
+            raise
+        return _client_ocr_unverified_result(
+            request, page_texts, source_text,
+            "The interpretation service could not verify this attempt. No notice instructions are presented as established facts. Your photo and recognized text are retained; retrying does not require Korean transcription.",
+            elapsed_ms=round((perf_counter() - started) * 1000),
+        )
     if pipeline.semantic_provider == "mock-semantic":
         normalized_ocr = re.sub(r"\s+", "", "".join(page_texts))
         if not any(re.sub(r"\s+", "", demo.original_text) == normalized_ocr for demo in DEMOS):
@@ -299,27 +356,33 @@ async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
                 detail="Mock analysis cannot interpret an incomplete or real notice photo. Use a bundled synthetic demo or configure the OpenAI semantic provider.",
             )
     result_id = f"notice-{uuid4().hex}"
-    pages = [
-        SourcePage(
-            id=f"{result_id}-page-{index}",
-            page_number=index,
-            filename=f"Page {index}",
-            media_type="application/octet-stream",
-            original_url="",
-            processed_url="",
-            width=1,
-            height=1,
-            readable=bool(text),
-            quality_issues=(
-                [] if text else [ImageQualityIssue(code="ocr_empty_page", message="Browser OCR recovered no text from this page.")]
-            ),
+    pages = _client_ocr_source_pages(page_texts, result_id)
+    add_page_provenance(pipeline.notice, page_texts, pages)
+    if table_uncertain:
+        mark_unverified_language_scores(pipeline.notice, source_text)
+    try:
+        pipeline = await _complete_english_coverage(
+            pipeline, layout_context=layout_context, allow_partial=request.allow_partial,
+            unverified_source_texts=tuple(unverified_texts),
         )
-        for index, text in enumerate(page_texts, start=1)
-    ]
+    except HTTPException as exc:
+        if not request.allow_partial or exc.status_code not in (422, 502, 503):
+            raise
+        return _client_ocr_unverified_result(
+            request, page_texts, source_text,
+            "The recovered notice could not pass source verification within this attempt's limits. Its instructions are withheld. Your photo and text are retained, and retrying does not require Korean transcription.",
+            elapsed_ms=round((perf_counter() - started) * 1000),
+            completed_pipeline=pipeline,
+        )
     add_page_provenance(pipeline.notice, page_texts, pages)
-    add_aligned_language_scores(pipeline.notice, ordered_pages, pages)
-    pipeline = await _complete_english_coverage(pipeline, layout_context=layout_context)
-    add_page_provenance(pipeline.notice, page_texts, pages)
+    if not table_uncertain:
+        # Literal cell pairs have independent positional evidence. A semantic
+        # judgment of applicability cannot erase the printed pairings or turn
+        # an unrelated/non-applicable table into positive eligibility.
+        add_aligned_language_scores(
+            pipeline.notice, ordered_pages, pages,
+            presentation="printed_table" if request.allow_partial else "eligibility",
+        )
     blank_pages = [page.page_number for page in pages if not page.readable]
     warnings = [f"Browser OCR recovered no text from page(s): {', '.join(map(str, blank_pages))}."] if blank_pages else []
     acquisition = _pipeline_acquisition(
@@ -334,6 +397,7 @@ async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
         "ocr_provider": "browser-ocr-kor-eng",
         "ocr_latency_ms": request.ocr_latency_ms,
         "total_latency_ms": request.ocr_latency_ms + pipeline.total_latency_ms,
+        "english_coverage_status": "partial" if blank_pages else pipeline.english_coverage_status,
     })
     result = make_result(
         pipeline.source_text,
@@ -352,6 +416,53 @@ async def analyze_client_ocr(request: ClientOcrRequest) -> AnalysisResult:
         "client_ocr_analysis_completed notice_id=%s provider=%s pages=%s semantic_requests=%s semantic_tokens=%s",
         result.id, pipeline.provider, len(pages), pipeline.semantic_requests, pipeline.semantic_total_tokens,
     )
+    return result
+
+
+def _client_ocr_source_pages(page_texts: list[str], result_id: str) -> list[SourcePage]:
+    return [
+        SourcePage(
+            id=f"{result_id}-page-{index}",
+            page_number=index,
+            filename=f"Page {index}",
+            media_type="application/octet-stream",
+            original_url="",
+            processed_url="",
+            width=1,
+            height=1,
+            readable=bool(text),
+            quality_issues=(
+                [] if text else [ImageQualityIssue(code="ocr_empty_page", message="Browser OCR recovered no text from this page.")]
+            ),
+        )
+        for index, text in enumerate(page_texts, start=1)
+    ]
+
+
+def _client_ocr_unverified_result(
+    request: ClientOcrRequest, page_texts: list[str], source_text: str, message: str,
+    *, extraction_status: str = "available", elapsed_ms: int = 0,
+    completed_pipeline: PipelineResult | None = None,
+) -> AnalysisResult:
+    """Keep the photo workflow usable without presenting unaudited facts."""
+    result_id = f"notice-{uuid4().hex}"
+    acquisition = (
+        _pipeline_acquisition(completed_pipeline, request.input_type, source_pages=len(page_texts))
+        if completed_pipeline else ImageAcquisitionReport(input_type=request.input_type, source_pages=len(page_texts))
+    ).model_copy(update={
+        "text_extraction_status": extraction_status, "english_coverage_status": "partial",
+        "unverified_source_units": len(audit_coverage(NoticeData(), source_text).units),
+        "pages_needing_review": len(page_texts), "ocr_provider": "browser-ocr-kor-eng",
+        "ocr_latency_ms": request.ocr_latency_ms, "total_latency_ms": request.ocr_latency_ms + elapsed_ms,
+        "metrics_complete": extraction_status == "unavailable",
+    })
+    result = make_result(
+        source_text, "", NoticeData(title="English interpretation unavailable", unverified_items=[message]),
+        "browser-ocr-kor-eng", result_id=result_id, recovered_text=source_text,
+        source_pages=_client_ocr_source_pages(page_texts, result_id),
+        acquisition=acquisition,
+    )
+    save_notice(result)
     return result
 
 

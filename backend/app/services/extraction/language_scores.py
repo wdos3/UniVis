@@ -2,17 +2,29 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict, deque
+from typing import Literal
 
 from app.models import BoundingBox, ClientOcrPage, LabeledFact, NoticeData, OcrSpan, ReviewState, SourceFact, SourcePage
 
 
 EXAM_NAME = re.compile(r"^(?:TOEIC(?:\s+Speaking)?|TOEFL(?:\s*\(?iBT\)?)?|TEPS|FLEX|OPIC|IELTS)$", re.IGNORECASE)
 EXAM_MENTION = re.compile(r"\b(?:TOEIC|TOEFL|TEPS|FLEX|OPIC|IELTS)\b", re.IGNORECASE)
-SCORE = re.compile(r"^((?:\d{1,4}(?:\.\d+)?|\d+[A-Z]|[A-Z]{1,3}\d+))\s*(?:점\s*)?이상$", re.IGNORECASE)
+# Letter ratings are defined proficiency levels, not arbitrary Latin words.
+ACTFL_RATING = r"(?:NL|NM|NH|IL|IM|IH|AL|AM|AH)"
+SCORE = re.compile(
+    rf"^((?:\d{{1,4}}(?:\.\d+)?|\d+[A-Z]|[A-Z]{{1,3}}\d+|{ACTFL_RATING}))\s*(?:점\s*)?이상$",
+    re.IGNORECASE,
+)
 EXAM_SUFFIX = re.compile(r"^(?:\(?iBT\)?|Speaking)$", re.IGNORECASE)
 EXAM_SCORE_CLAIM = re.compile(
     r"\b(?:TOEIC|TOEFL|TEPS|FLEX|OPIC|IELTS)\b.{0,36}?"
     r"(?:\b\d{1,4}(?:\.\d+)?\b|\b\d+[A-Z]\b|\b[A-Z]{1,3}\d+\b)",
+    re.IGNORECASE,
+)
+LETTER_SCORE_CLAIM = re.compile(
+    rf"\b(?:OPIC|TOEIC\s+Speaking)\b\s*"
+    rf"(?:(?:score|rating|level|grade)(?:\s+of)?\s*)?[:=-]?\s*"
+    rf"(?:(?:must\s+be|is)\s+)?(?:at\s+least\s+)?{ACTFL_RATING}\b",
     re.IGNORECASE,
 )
 ONE_OF_SCORES = re.compile(r"(?:중\s*하나\s*이상|중\s*1개\s*이상)")
@@ -39,13 +51,40 @@ def _union_box(spans: list[OcrSpan]) -> BoundingBox:
     return BoundingBox(x=left, y=top, width=right - left, height=bottom - top)
 
 
+def _same_table_observation(left: OcrSpan, right: OcrSpan) -> bool:
+    if re.sub(r"\s+", "", left.text).casefold() != re.sub(r"\s+", "", right.text).casefold():
+        return False
+    intersection_width = max(
+        0.0, min(left.box.x + left.box.width, right.box.x + right.box.width)
+        - max(left.box.x, right.box.x),
+    )
+    intersection_height = max(
+        0.0, min(left.box.y + left.box.height, right.box.y + right.box.height)
+        - max(left.box.y, right.box.y),
+    )
+    intersection = intersection_width * intersection_height
+    union = left.box.width * left.box.height + right.box.width * right.box.height - intersection
+    return union > 0 and intersection / union >= 0.6
+
+
+def _distinct_table_spans(spans: list[OcrSpan]) -> list[OcrSpan]:
+    # Browser crop passes can repeat the same cell with casing/spacing differences.
+    # Keep different values, and repeated labels in distinct cells, as ambiguity.
+    distinct: list[OcrSpan] = []
+    for span in spans:
+        if not any(_same_table_observation(span, retained) for retained in distinct):
+            distinct.append(span)
+    return distinct
+
+
 def _score_pairs(
     page: ClientOcrPage, page_number: int = 1
 ) -> list[tuple[str, str, str, BoundingBox]]:
     if not any(token in page.text for token in ("어학", "영어")):
         return []
-    headers = [span for span in page.spans if EXAM_NAME.fullmatch(span.text.strip())]
-    scores = [span for span in page.spans if SCORE.fullmatch(span.text.strip())]
+    spans = _distinct_table_spans(page.spans)
+    headers = [span for span in spans if EXAM_NAME.fullmatch(span.text.strip())]
+    scores = [span for span in spans if SCORE.fullmatch(span.text.strip())]
     if len(headers) < 2:
         return []
     pairs: list[tuple[str, str, str, BoundingBox]] = []
@@ -77,14 +116,14 @@ def _score_pairs(
         paired_headers.add(id(header))
         header_y = _center(header)[1]
         suffixes = [
-            span for span in page.spans
+            span for span in spans
             if EXAM_SUFFIX.fullmatch(span.text.strip())
             and abs(_center(span)[0] - score_x) <= 0.025
             and header_y < _center(span)[1] < score_y
         ]
         suffixes.sort(key=lambda span: _center(span)[1])
         unknown_suffixes = [
-            span for span in page.spans
+            span for span in spans
             if span not in suffixes
             and re.fullmatch(r"[A-Za-z0-9() -]{2,18}", span.text.strip())
             and re.search(r"[A-Za-z]", span.text)
@@ -134,7 +173,7 @@ def validate_aligned_language_scores(ocr_pages: list[ClientOcrPage]) -> None:
 
 
 def _model_score_claim(text: str) -> bool:
-    return bool(EXAM_SCORE_CLAIM.search(text))
+    return bool(EXAM_SCORE_CLAIM.search(text) or LETTER_SCORE_CLAIM.search(text))
 
 
 def _without_model_score_claims(text: str) -> str:
@@ -195,8 +234,45 @@ def mark_unverified_language_scores(notice: NoticeData, source_text: str = "") -
         )
 
 
-def add_aligned_language_scores(notice: NoticeData, ocr_pages: list[ClientOcrPage], source_pages: list[SourcePage]) -> int:
-    """Replace model-guessed exam thresholds with OCR column-aligned values."""
+def _aligned_score_choice(
+    found: list[tuple[int, str, str, str, BoundingBox]], ocr_pages: list[ClientOcrPage],
+) -> tuple[int, OcrSpan] | None:
+    if len({page_number for page_number, _, _, _, _ in found}) != 1:
+        return None
+    for page_number, page in enumerate(ocr_pages, start=1):
+        boxes = [box for pair_page, _, _, _, box in found if pair_page == page_number]
+        if not boxes:
+            continue
+        top = min(box.y for box in boxes)
+        left = min(box.x for box in boxes)
+        right = max(box.x + box.width for box in boxes)
+        # A page can contain separate language tables. A global OR clause must
+        # not be applied to all of them merely because the words occur nearby.
+        aligned_rows = (
+            max(box.x for box in boxes) - left <= 0.025
+            and right - min(box.x + box.width for box in boxes) <= 0.025
+        )
+        if not aligned_rows and max(box.y + box.height for box in boxes) - top > 0.12:
+            continue
+        choices = [
+            span for span in page.spans
+            if ONE_OF_SCORES.search(span.text) and ("영어" in span.text or EXAM_MENTION.search(span.text))
+            and 0 <= top - span.box.y <= 0.08
+            and span.box.x < right and span.box.x + span.box.width > left
+        ]
+        choice_texts = {
+            re.sub(r"\s+", "", span.text.lstrip(" ·•*")).casefold() for span in choices
+        }
+        if len(choice_texts) == 1:
+            return page_number, choices[0]
+    return None
+
+
+def add_aligned_language_scores(
+    notice: NoticeData, ocr_pages: list[ClientOcrPage], source_pages: list[SourcePage], *,
+    presentation: Literal["eligibility", "printed_table"] = "eligibility",
+) -> int:
+    """Preserve aligned cell values without inferring unverified applicability."""
     found: list[tuple[int, str, str, str, BoundingBox]] = []
     for page_number, page in enumerate(ocr_pages, start=1):
         found.extend((page_number, *pair) for pair in _score_pairs(page, page_number))
@@ -204,20 +280,18 @@ def add_aligned_language_scores(notice: NoticeData, ocr_pages: list[ClientOcrPag
         mark_unverified_language_scores(notice, "\n".join(page.text for page in ocr_pages))
         return 0
 
-    _remove_model_score_claims(notice)
+    if presentation == "eligibility":
+        _remove_model_score_claims(notice)
 
     next_id = max((int(fact.id[1:]) for fact in notice.source_facts), default=0) + 1
     # Preserve the source's OR condition, not six simultaneous requirements.
-    one_of = next(
-        ((page_number, line.strip(), page) for page_number, page in enumerate(ocr_pages, start=1)
-         for line in page.text.splitlines() if ONE_OF_SCORES.search(line)),
-        None,
-    )
-    if one_of and not any("at least one" in item.text.lower() for item in notice.eligibility):
-        page_number, line, page = one_of
+    one_of = _aligned_score_choice(found, ocr_pages) if presentation == "eligibility" else None
+    if one_of:
+        page_number, choice_span = one_of
+        line = choice_span.text.strip()
         fact_id = f"F{next_id:03d}"
         next_id += 1
-        box = next((span.box for span in page.spans if span.text.strip() == line), None)
+        box = choice_span.box
         source_image_id = source_pages[page_number - 1].id
         notice.source_facts.append(SourceFact(
             id=fact_id, kind="language_score_choice", source_text=line, critical=True,
@@ -231,21 +305,34 @@ def add_aligned_language_scores(notice: NoticeData, ocr_pages: list[ClientOcrPag
             source_page=page_number, source_image_id=source_image_id, bounding_box=box,
         ))
 
+    if presentation == "eligibility":
+        target = notice.eligibility
+        fact_kind = "language_score"
+        item_label = "English test score"
+    else:
+        target = notice.key_details
+        fact_kind = "printed_language_score"
+        item_label = "Printed English-score table (applicability unverified)"
     for page_number, label, threshold, evidence, box in found:
         fact_id = f"F{next_id:03d}"
         next_id += 1
         source_image_id = source_pages[page_number - 1].id
         notice.source_facts.append(SourceFact(
-            id=fact_id, kind="language_score", source_text=evidence, critical=True,
+            id=fact_id, kind=fact_kind, source_text=evidence, critical=True,
             state=ReviewState.NEEDS_REVIEW, source_page=page_number,
             source_image_id=source_image_id, bounding_box=box,
         ))
-        notice.eligibility.append(LabeledFact(
-            text=f"{label}: {threshold} or higher", label="English test score",
+        target.append(LabeledFact(
+            text=f"{label}: {threshold} or higher" if presentation == "eligibility" else f"Printed table: {label} — {threshold} or higher",
+            label=item_label,
             source_evidence=evidence, source_fact_ids=[fact_id], state=ReviewState.NEEDS_REVIEW,
             source_page=page_number, source_image_id=source_image_id, bounding_box=box,
         ))
-    notice.unverified_items.append(
+    warning = (
         "English-test score pairs were reconstructed from OCR column alignment; verify them against the official notice."
+        if presentation == "eligibility" else
+        "The printed English-score table is shown literally; its applicability to this notice or applicant has not been verified."
     )
+    if warning not in notice.unverified_items:
+        notice.unverified_items.append(warning)
     return len(found)

@@ -37,16 +37,31 @@ PyMuPDF handles selectable text but reading order can be wrong in multi-column l
 
 ## Long and composite notices
 
-Small-text recovery adds a local lower-page OCR pass for tall hosted photographs.
+Images in the tray are pages of one notice. **Upload another notice** replaces
+them when testing a different notice. A photograph containing cut-off neighboring
+posters needs a crop of the intended notice; interpretation cannot establish words
+outside the photo. This pipeline supports varied content and layouts, but does not
+guarantee successful or complete interpretation of every Korean image.
+
+Small-text recovery uses an adaptive local crop selected by text size/confidence
+and a separate lower-edge fallback for tall photos, at most two extra crops. Text missed entirely by
+the first detector and unselected regions may remain unreadable.
 It can still miss a footer or return conflicting readings; the UI retains these
 for comparison/correction. A high confidence value does not establish accuracy.
 Exact-value and spending-clause guards cover known patterns, not arbitrary Korean
 meaning. The smaller extraction schema reduces redundant output but retains the
 independent audit; latency remains device/provider-dependent. Measurements and
 the incomplete coverage of real-photo regressions are documented in
-[the verification report](V2_RECOVERY_VERIFICATION.md).
+[the generalization verification report](V2_GENERALIZATION_VERIFICATION.md); earlier
+release timings are retained in [the historical report](V2_RECOVERY_VERIFICATION.md).
 
-The semantic provider does not implement section-aware chunking and reconciliation. Very long notices may exceed a model limit or lose cross-section context. MyMemory must split text into sub-500-byte queries; the current splitter preserves paragraph/column boundaries and complete OCR lines when they fit but cannot reconstruct table meaning. A long notice can exhaust the public translator's quota or fail partway through. The source-line completeness audit is capped at 120 units. The text API applies a 200,000-character ceiling; visual inputs accept at most 12 pages, 15 MB per image page, and 50 MB total. Provider failures and unverified completeness are surfaced instead of silently bypassed.
+The semantic provider does not implement section-aware chunking and reconciliation. Very long notices may exceed a model limit or lose cross-section context. MyMemory must split text into sub-500-byte queries; the current splitter preserves paragraph/column boundaries and complete OCR lines when they fit but cannot reconstruct table meaning. A long notice can exhaust the public translator's quota or fail partway through. The source-line completeness audit is capped at 120 units. The text API applies a 200,000-character ceiling; visual inputs accept at most 12 pages, 15 MB per image page, and 50 MB total. Strict text/document APIs reject unverified completeness. Photo mode instead
+withholds unverifiable claims and labels the result partial; total interpretation
+failure yields an English unavailable state with no factual instructions. This is
+continuity of the workflow, not guaranteed successful interpretation. External
+service outages, browser/model-load failures, network loss, and enforced input/rate
+limits can still prevent an analysis. Korean transcription is never required by
+the normal photo workflow.
 
 ## Visual and cultural interpretation
 
@@ -58,13 +73,14 @@ Concise language can unintentionally weaken a qualification, remove context, or 
 
 ## Evaluation bias
 
-The five text demos and seven image pages are synthetic and authored to fit the schema. They cannot estimate performance on real notices. Familiarity, English ability, device, camera quality, visual literacy, notice difficulty, and question design may confound study outcomes.
+The five text demos, seven generated image pages, and cross-notice injected-audit
+contract tests are synthetic and authored to fit the schema. They cannot estimate performance on real notices. Familiarity, English ability, device, camera quality, visual literacy, notice difficulty, and question design may confound study outcomes.
 
 The included answer scorer is intentionally simple and can misclassify synonymous or partially correct answers. Formal studies need pre-registered scoring rules and human adjudication.
 
 ## Privacy and deployment
 
-SQLite and source-image storage have no user-account authentication or encryption. The hosted UI's browser-OCR camera/image path keeps photos on the visitor's device and persists only recognized text/results server-side. The local Python/Docker image API still stores originals and processed copies under `data/uploads` (or the cloud data volume) until manually removed; there is no retention scheduler. Public mode disables global notice browsing, editing, reprocessing, and study CSV export without a server-side administrator token, but stored results and any images uploaded through the legacy API still need protection. Do not submit private notices to the public deployment. OCR text is sent to the configured translation service and Korean plus translated text is sent to the semantic provider. Researchers must assess both providers' terms and institutional data-handling requirements before using sensitive material.
+SQLite and source-image storage have no user-account authentication or encryption. The hosted UI's browser-OCR camera/image path keeps photos on the visitor's device and persists only recognized text/results server-side. The local Python/Docker image API still stores originals and processed copies under `data/uploads` (or the cloud data volume) until manually removed; there is no retention scheduler. Public mode disables global notice browsing, editing, reprocessing, and study CSV export without a server-side administrator token, but stored results and any images uploaded through the legacy API still need protection. Do not submit private notices to the public deployment. OCR text is sent to the configured translation service. Photo semantics uses the Korean evidence directly; strict document/text semantics can also send the temporary translation to the semantic provider. Researchers must assess both providers' terms and institutional data-handling requirements before using sensitive material.
 
 ## Deferred work
 
@@ -78,3 +94,16 @@ SQLite and source-image storage have no user-account authentication or encryptio
 - graphical decision-tree branching beyond conditional cards/tables;
 - post-comparison preference survey and counterbalancing logic;
 - configurable retention, production authentication, encryption, migration tooling, and deployment hardening.
+
+## Interpreting partial results
+
+English gap locations refer to recovered source lines, not an automatically known
+missing field. Entirely undetected text cannot be enumerated by the source audit.
+A readable notice title can be withheld when free title/summary context cannot be
+independently verified while another region remains uncertain; a translated heading
+may still appear as a grounded detail. A partial result can withhold important
+application or contact information and must not be treated as complete.
+
+Failed provider calls may have consumed tokens the SDK did not return. Their
+reported tokens cover successful responses only, with `metrics_complete=false`;
+wall time still includes the failed operation. No zero-cost claim is implied.

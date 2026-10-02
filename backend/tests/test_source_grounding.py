@@ -82,3 +82,26 @@ def test_rejected_invented_action_does_not_leave_a_gap_in_presentation_steps() -
     assert len(grounded.actions) == 1
     assert grounded.actions[0].step == 1
     assert grounded.actions[0].action == "Submit the application."
+
+
+def test_real_quote_on_the_wrong_page_cannot_ground_a_claim() -> None:
+    source = "[Page 1]\n신청서 제출\n[Page 2]\n참가비 1만원"
+    notice = NoticeData(
+        fees=[LabeledFact(text="Pay KRW 99,000.", source_evidence="참가비 1만원", source_page=1)],
+        source_facts=[SourceFact(id="F001", kind="fee", source_text="참가비 1만원", source_page=1)],
+    )
+    grounded = retain_source_grounded_items(notice, source)
+    assert grounded.fees == []
+    assert grounded.source_facts == []
+
+
+def test_matching_page_quote_is_retained_without_borrowing_another_pages_fact_id() -> None:
+    source = "[Page 1]\n신청서 제출\n[Page 2]\n신청서 제출"
+    notice = NoticeData(
+        key_details=[LabeledFact(text="Submit the application.", source_evidence="신청서 제출", source_page=2, source_fact_ids=["F001"])],
+        source_facts=[SourceFact(id="F001", kind="application", source_text="신청서 제출", source_page=1)],
+    )
+    grounded = retain_source_grounded_items(notice, source)
+    assert grounded.key_details[0].source_page == 2
+    assert grounded.key_details[0].source_fact_ids == ["F002"]
+    assert grounded.source_facts[-1].source_page == 2

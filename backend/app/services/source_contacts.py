@@ -4,13 +4,15 @@ import re
 
 
 _PHONE = re.compile(
-    r"(?<![\w])(?:\+\d{1,3}[. -]?)?\(?\d{1,4}\)?[. -]?\d{3,4}[. -]?\d{4}(?![\w])"
+    r"(?<![A-Za-z0-9_])(?:\+\d{1,3}[. -]?)?\(?\d{1,4}\)?[. -]?\d{3,4}[. -]?\d{4}(?![A-Za-z0-9_])"
 )
 _PHONE_CANDIDATE = re.compile(
-    r"(?<![\w])(?:\+\d{1,3}[. -]?)?\(?\d[\dA-Za-z가-힣\u3130-\u318f?]{1,3}\)?[. -]"
-    r"[\dA-Za-z가-힣\u3130-\u318f?]{3,4}[. -][\dA-Za-z가-힣\u3130-\u318f?]{4}(?![\w])"
+    r"(?<![A-Za-z0-9_])(?:\+\d{1,3}[. -]?)?\(?\d[\dA-Za-z가-힣\u3130-\u318f?]{1,3}\)?[. -]"
+    r"[\dA-Za-z가-힣\u3130-\u318f?]{3,4}[. -][\dA-Za-z가-힣\u3130-\u318f?]{4}(?![A-Za-z0-9_])"
 )
-_EMAIL = re.compile(r"(?<![\w@])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![\w@])")
+# Korean labels and grammatical particles often directly adjoin a contact.
+# ASCII token boundaries reject partial Latin addresses without rejecting them.
+_EMAIL = re.compile(r"(?<![A-Za-z0-9_@])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?![A-Za-z0-9_@-]|\.[A-Za-z0-9_-])")
 _PAGE_MARKER = re.compile(r"^\[Page (\d+)\]$")
 _CONTACT_CUE = re.compile(r"문의|전화|연락|\b(?:phone|tel|contact)\b", re.IGNORECASE)
 
@@ -27,11 +29,19 @@ def phone_digits(value: str) -> str | None:
 
 
 def phone_values(text: str) -> dict[str, str]:
-    return {
-        digits: candidate.group()
-        for candidate in _PHONE.finditer(text)
-        if (digits := phone_digits(candidate.group())) is not None
-    }
+    values: dict[str, str] = {}
+    for candidate in _PHONE.finditer(text):
+        printed = candidate.group()
+        digits = phone_digits(printed)
+        if digits is None or re.match(r"\s*(?:억|만|천)?원", text[candidate.end():]):
+            continue
+        if printed.isdigit() and not (
+            (printed.startswith("0") and len(printed) in (9, 10, 11))
+            or _CONTACT_CUE.search(text[max(0, candidate.start() - 12):candidate.start()])
+        ):
+            continue
+        values[digits] = printed
+    return values
 
 
 def email_values(text: str) -> set[str]:

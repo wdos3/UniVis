@@ -17,11 +17,25 @@ _KRW_AMOUNT = re.compile(r"(?<!\d)([\d,]+(?:\.\d+)?)\s*(억|만|천)?\s*원")
 _KRW_UNIT = {None: 1, "천": 1_000, "만": 10_000, "억": 100_000_000}
 _DISPLAY_NUMBER = re.compile(r"(?<![A-Za-z0-9])\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])")
 _CURRENCY = re.compile(r"\b(?:KRW|won)\b|₩", re.IGNORECASE)
+_ENGLISH_CURRENCY_AMOUNT = re.compile(
+    r"(?:\bKRW\s*|₩\s*)([\d,]+(?:\.\d+)?)|([\d,]+(?:\.\d+)?)\s*(?:KRW\b|won\b)", re.IGNORECASE,
+)
 _SOURCE_DATE = re.compile(
     r"(?<!\d)(20\d{2})\s*(?:[./-]|년)\s*(0?[1-9]|1[0-2])\s*"
     r"(?:[./-]|월)\s*(0?[1-9]|[12]\d|3[01])(?:\s*일)?(?!\d)"
 )
 _SOURCE_MONTH_DAY = re.compile(r"(?<!\d)(0?[1-9]|1[0-2])\s*월\s*(0?[1-9]|[12]\d|3[01])\s*일")
+_ABBREVIATED_MONTH_DAY = re.compile(
+    r"(?<![\d./])(0?[1-9]|1[0-2])\s*[./]\s*(0?[1-9]|[12]\d|3[01])(?![\d./])"
+)
+_SOURCE_WEEKDAY = re.compile(r"\(\s*[월화수목금토일]\s*\)")
+_DATE_LABEL = re.compile(
+    r"(?:신청|접수|모집|등록|납부|행사)?\s*(?:기간|일시|일자|날짜|마감|일정|기한)\s*[:：|]?\s*$"
+)
+_BARE_DATE_RANGE = re.compile(
+    r"\s*(?:0?[1-9]|1[0-2])\s*[./]\s*(?:0?[1-9]|[12]\d|3[01])\s*"
+    r"[~～–—]\s*(?:0?[1-9]|1[0-2])\s*[./]\s*(?:0?[1-9]|[12]\d|3[01])\s*"
+)
 _SOURCE_YEAR = re.compile(r"(?<!\d)(20\d{2})\s*년")
 _SOURCE_THRESHOLD = re.compile(r"(?<![A-Za-z0-9])([\d,]+)\s*(?:점\s*)?(?:이상|이하|초과|미만)")
 _SOURCE_COUNT_RANGE = re.compile(r"(?<!\d)(\d+)\s*[-~–]\s*(\d+)\s*명")
@@ -31,6 +45,18 @@ _MONTH_NAMES = (
     "january", "february", "march", "april", "may", "june",
     "july", "august", "september", "october", "november", "december",
 )
+_SOURCE_INSTALLMENT = re.compile(
+    r"(?P<number>[1-9]\d*)\s*(?:회\s*차|차|번째)\s*"
+    r"(?:지원금|장학금|보조금|활동비|연구비|분할금|지급|입금|교부|수령)"
+)
+_INSTALLMENT_CONDITION_CUE = re.compile(
+    r"한하여|한해|경우에만|때만|(?:제출|확인|검증|완료|승인|통과)\s*(?:후|시)"
+)
+_ORDINAL_WORDS = {
+    1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", 6: "sixth",
+    7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth", 11: "eleventh", 12: "twelfth",
+}
+_INSTALLMENT_NOUN = r"(?:instal(?:l)?ment|payment|disbursement|transfer|tranche)"
 _SPENDING_RULES = (
     (r"기자재", r"\b(?:equipment|instruments?|apparatus|devices?)\b", "equipment"),
     (r"구입", r"\b(?:purchas\w*|buy\w*|bought|acquir\w*)\b", "purchase"),
@@ -42,11 +68,13 @@ _SPENDING_RULES = (
     (r"방문", r"\bvisit\w*\b|\bin[ -]person\b|\bgo(?:ing)? to\b", "in-person visit"),
 )
 _SOURCE_CONDITIONS = (
+    (r"프로그램\s*내\s*중복\s*(?:참여|신청)", r"\b(?:within|in|for)\s+(?:the\s+)?(?:same\s+|this\s+|single\s+)?program\b|\b(?:same|this|single)\s+program\b", "duplicate participation within the same program"),
+    (r"비교과\s*통합\s*관리", r"\bextracurricular\b", "extracurricular system scope"),
     (r"연구지도\s*를\s*받는", r"\bresearch (?:supervision|guidance)\b|\bsupervised research\b", "receiving research supervision"),
     (r"휴학생[^\n]*연구비\s*및\s*활동비[^\n]*제외", r"\bresearch\b", "research funding exclusion"),
     (r"휴학생[^\n]*연구비\s*및\s*활동비[^\n]*제외", r"\bactivity\b", "activity allowance exclusion"),
     (r"학부\s*재학생", r"\benrolled\b|\bcurrently attending\b|\bregistered undergraduate", "enrolled undergraduates"),
-    (r"교내", r"\bon[ -]campus\b|\bwithin (?:the |this |our )?(?:university|institution|school)\b|\b(?:at|from|by|of) (?:the|this|our|same) (?:university|institution|school)\b", "on-campus scope"),
+    (r"교내", r"\b(?:on[ -]campus|campus|internal|university[ -]wide)\b|\bwithin (?:the |this |our )?(?:university|institution|school)\b|\b(?:at|from|by|of) (?:the|this|our|same) (?:university|institution|school)\b", "on-campus scope"),
     (r"동일", r"\b(?:same|identical)\b", "same topic"),
     (r"유사", r"\b(?:similar|comparable)\b", "similar topic"),
     (r"연구\s*주제[^\n]*지원\s*을\s*받는", r"\b(?:supported|funded)\b|\b(?:receiv(?:e[sd]?|ing)|get(?:s|ting)?|got|obtain(?:s|ed|ing)?)\b(?:\W+\w+){0,4}?\W+(?:support|funding|funds|grants?)\b|\bin receipt of (?:support|funding)\b", "receiving support qualification"),
@@ -80,8 +108,8 @@ def missing_english_literals(source_text: str, detail_text: str) -> list[str]:
     """Find explicit English OCR phrases missing from reader-facing English.
 
     Spacing, punctuation, and case may differ, but lexical words must remain
-    unchanged and in order. This catches plausible yet incorrect expansions
-    of source terminology, such as changing "Minimum Value" to "Minimum Viable".
+    unchanged and in order. This catches plausible yet incorrect substitutions
+    in printed terminology without defining notice-specific translations.
     """
     detail_words = _ENGLISH_WORD.findall(detail_text.casefold())
     missing: list[str] = []
@@ -98,10 +126,17 @@ def missing_spending_rules(source_text: str, english_text: str) -> list[str]:
     This is a narrow omission check, not a general translation verifier. The
     independent semantic audit still checks conditions and combined meaning.
     """
-    return [
+    missing = [
         meaning for source, english, meaning in _SPENDING_RULES
         if re.search(source, source_text) and not re.search(english, english_text, re.IGNORECASE)
     ]
+    if (
+        re.search(r"방문[^\n]{0,60}카드\s*결제", source_text)
+        and not re.search(r"가능|선택|자율", source_text)
+        and re.search(r"\b(?:can|may|optional(?:ly)?)\b", english_text, re.IGNORECASE)
+    ):
+        missing.append("prescribed in-person card-payment procedure")
+    return missing
 
 
 def missing_source_conditions(source_text: str, english_text: str) -> list[str]:
@@ -110,10 +145,43 @@ def missing_source_conditions(source_text: str, english_text: str) -> list[str]:
     Only these recognized source conditions are checked locally; the audit
     remains responsible for their relationships and the rest of the meaning.
     """
-    return [
+    missing = [
         meaning for source, english, meaning in _SOURCE_CONDITIONS
         if re.search(source, source_text) and not re.search(english, english_text, re.IGNORECASE)
     ]
+    missing.extend(_missing_installment_scope(source_text, english_text))
+    return missing
+
+
+def _missing_installment_scope(source_text: str, english_text: str) -> list[str]:
+    """A condition for a numbered payment must retain that payment's identity.
+
+    A total such as "three installments" does not establish which installment
+    has a prerequisite. Match only explicit payment labels near a source
+    condition; the semantic audit still verifies the prerequisite's meaning.
+    """
+    labels = list(_SOURCE_INSTALLMENT.finditer(source_text))
+    conditional_orders: set[int] = set()
+    for condition in _INSTALLMENT_CONDITION_CUE.finditer(source_text):
+        nearby = [
+            (max(label.start() - condition.end(), condition.start() - label.end(), 0), label)
+            for label in labels
+        ]
+        if not nearby:
+            continue
+        distance, label = min(nearby, key=lambda pair: pair[0])
+        if distance <= 80:
+            conditional_orders.add(int(label["number"]))
+    missing: list[str] = []
+    for number in sorted(conditional_orders):
+        ordinal = rf"(?:{_ORDINAL_WORDS.get(number, str(number))}|{number}(?:st|nd|rd|th)?)"
+        label = (
+            rf"\b{ordinal}\s+(?:(?:support|grant|scholarship|funding)\s+){{0,2}}{_INSTALLMENT_NOUN}\b"
+            rf"|\b{_INSTALLMENT_NOUN}\s*(?:(?:number|no\.?|#)\s*)?{ordinal}\b"
+        )
+        if not re.search(label, english_text, re.IGNORECASE):
+            missing.append(f"condition applying to installment {number}")
+    return missing
 
 
 def _display_numbers(text: str) -> set[Decimal]:
@@ -147,6 +215,26 @@ def _has_latin_term(term: str, display_words: set[str]) -> bool:
     return word in display_words or f"{word}s" in display_words or f"{word}es" in display_words
 
 
+def _abbreviated_source_dates(source_text: str) -> set[tuple[None, int, int]]:
+    """Recognize calendar context without treating every decimal as a date.
+
+    Notice ranges commonly print the year only at the first endpoint. The
+    abbreviated endpoint still needs its own month/day in English, but a bare
+    range cannot establish a year. Weekdays and adjacent date labels also make
+    an abbreviated date distinguishable from prices or software versions.
+    """
+    dates: set[tuple[None, int, int]] = set()
+    for line in source_text.splitlines():
+        calendar_line = bool(
+            _SOURCE_DATE.search(line) or _SOURCE_WEEKDAY.search(line)
+            or _BARE_DATE_RANGE.fullmatch(line)
+        )
+        for match in _ABBREVIATED_MONTH_DAY.finditer(line):
+            if calendar_line or _DATE_LABEL.search(line[:match.start()]):
+                dates.add((None, int(match[1]), int(match[2])))
+    return dates
+
+
 def missing_source_values(source_text: str, english_text: str) -> list[str]:
     """Conservatively guard exact values before an OCR unit is called represented.
 
@@ -165,6 +253,7 @@ def missing_source_values(source_text: str, english_text: str) -> list[str]:
 
     dates = {(int(year), int(month), int(day)) for year, month, day in _SOURCE_DATE.findall(source_text)}
     dates.update((None, int(month), int(day)) for month, day in _SOURCE_MONTH_DAY.findall(source_text))
+    dates.update(_abbreviated_source_dates(source_text))
     dates = {
         date for date in dates
         if date[0] is not None or not any(
@@ -203,3 +292,21 @@ def missing_source_values(source_text: str, english_text: str) -> list[str]:
                 if not _has_latin_term(term, display_words):
                     missing.append(term)
     return list(dict.fromkeys(missing))
+
+
+def unsupported_currency_amounts(source_evidence: str, english_text: str) -> list[str]:
+    """A monetary claim needs its amount in this item's actual quotation."""
+    quoted_amounts = {
+        Decimal(match[1].replace(",", "")) * _KRW_UNIT[match[2]]
+        for match in _KRW_AMOUNT.finditer(source_evidence)
+    }
+    quoted_amounts.update(
+        Decimal((match[1] or match[2]).replace(",", ""))
+        for match in _ENGLISH_CURRENCY_AMOUNT.finditer(source_evidence)
+    )
+    unsupported = []
+    for match in _ENGLISH_CURRENCY_AMOUNT.finditer(english_text):
+        amount = Decimal((match[1] or match[2]).replace(",", ""))
+        if amount not in quoted_amounts:
+            unsupported.append(f"KRW {amount:,.0f}")
+    return list(dict.fromkeys(unsupported))

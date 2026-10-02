@@ -12,6 +12,11 @@ interface DecodedQrUrl {
   box: BoundingBox
 }
 
+interface QrDecodeResult {
+  urls: DecodedQrUrl[]
+  reachedTimeLimit: boolean
+}
+
 interface QrBounds {
   left: number
   right: number
@@ -24,12 +29,17 @@ const QR_MAX_IMAGE_SIDE = 3500
 const QR_TILE_SIZE = 1000
 const QR_TILE_STEP = 800
 const QR_MAX_CODES_PER_TILE = 4
+// A Promise timeout cannot interrupt synchronous decoding on the main thread.
+const QR_SCAN_BUDGET_MS = 1500
 // QR work runs alongside PaddleOCR and may add only this much time after OCR finishes.
 const QR_EXTRA_WAIT_MS = 1500
 const TEXT_DETECTION_MAX_SIDE = 2000
-// Small angled footer text needs a less restrictive detector than a full poster.
-const DETAIL_REGION_START = 0.84
+// Adaptive recovery plus one tall-image edge check keeps inference bounded.
+const DETAIL_REGION_FRACTION = 0.4
+const DETAIL_TEXT_HEIGHT_PX = 24
+const DETAIL_CONFIDENCE_THRESHOLD = 0.85
 const DETAIL_DETECTION_MAX_SIDE = 2800
+const BOTTOM_EDGE_REGION_START = 0.84
 
 export interface BrowserOcrMetrics {
   latencyMs: number
@@ -38,6 +48,7 @@ export interface BrowserOcrMetrics {
   modelState: 'initialized' | 'reused'
   detectionMs: number | null
   recognitionMs: number | null
+  qrMs?: number | null
   detailPasses: number
   recoveryWarnings: string[]
 }
@@ -164,21 +175,80 @@ function addDetailText(page: BrowserOcrPage, detail: BrowserOcrPage): BrowserOcr
   return { text: [page.text, ...additions].filter(Boolean).join('\n'), spans }
 }
 
-async function recognizeFooter(file: File, fullResult: OcrResult, engine: OcrEngine): Promise<OcrResult | null> {
+function detailRegion(result: OcrResult): BoundingBox | null {
+  const image = result.image
+  if (!image?.width || !image.height) return null
+  const detectionScale = Math.min(1, TEXT_DETECTION_MAX_SIDE / Math.max(image.width, image.height))
+  const candidates = result.items.flatMap((item) => {
+    const box = spanBox(item, image)
+    if (!item.text.trim() || !box) return []
+    const textHeight = box.height * image.height * detectionScale
+    const smallText = detectionScale < 1 && textHeight < DETAIL_TEXT_HEIGHT_PX
+    const uncertain = Number.isFinite(item.score) && item.score >= 0 && item.score < DETAIL_CONFIDENCE_THRESHOLD
+    if (!smallText && !uncertain) return []
+    const weight = (smallText ? Math.min(3, DETAIL_TEXT_HEIGHT_PX / textHeight) : 0)
+      + (uncertain ? 1 + DETAIL_CONFIDENCE_THRESHOLD - item.score : 0)
+    return [{ box, weight }]
+  })
+  if (!candidates.length) return null
+  const wide = image.width > image.height
+  let selected: BoundingBox | null = null
+  let selectedWeight = 0
+  for (const candidate of candidates) {
+    const center = wide ? candidate.box.x + candidate.box.width / 2 : candidate.box.y + candidate.box.height / 2
+    const candidateLength = wide ? candidate.box.width : candidate.box.height
+    const fraction = Math.min(1, Math.max(DETAIL_REGION_FRACTION, candidateLength + 0.04))
+    const start = Math.max(0, Math.min(1 - fraction, center - fraction / 2))
+    const weight = candidates.reduce((sum, item) => {
+      const itemCenter = wide ? item.box.x + item.box.width / 2 : item.box.y + item.box.height / 2
+      return itemCenter >= start && itemCenter <= start + fraction ? sum + item.weight : sum
+    }, 0)
+    if (weight > selectedWeight) {
+      selectedWeight = weight
+      selected = wide
+        ? { x: start, y: 0, width: fraction, height: 1 }
+        : { x: 0, y: start, width: 1, height: fraction }
+    }
+  }
+  return selected
+}
+
+function detailRegions(result: OcrResult): BoundingBox[] {
+  const adaptive = detailRegion(result)
+  const regions = adaptive ? [adaptive] : []
+  const image = result.image
+  if (!image?.width || !image.height || image.height <= TEXT_DETECTION_MAX_SIDE || image.height / image.width < 1.4) {
+    return regions
+  }
+  // Initial detection can omit small edge text entirely, leaving no confidence
+  // or box to select. Recheck that blind spot even when a noisier region wins.
+  const bottomAlreadyCovered = adaptive && adaptive.x === 0 && adaptive.width === 1
+    && adaptive.y <= BOTTOM_EDGE_REGION_START && adaptive.y + adaptive.height >= 1 - Number.EPSILON
+  if (!bottomAlreadyCovered) {
+    regions.push({ x: 0, y: BOTTOM_EDGE_REGION_START, width: 1, height: 1 - BOTTOM_EDGE_REGION_START })
+  }
+  return regions
+}
+
+async function recognizeDetail(
+  file: File, fullResult: OcrResult, engine: OcrEngine, region: BoundingBox,
+): Promise<OcrResult> {
   const image = fullResult.image
-  if (!image?.width || !image.height || image.height <= TEXT_DETECTION_MAX_SIDE || image.height / image.width < 1.4) return null
+  if (!image?.width || !image.height) throw new Error('The original OCR result did not retain image coordinates.')
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
   try {
     if (bitmap.width !== image.width || bitmap.height !== image.height) {
       throw new Error('The browser image orientation did not match OCR coordinates.')
     }
-    const top = Math.floor(bitmap.height * DETAIL_REGION_START)
-    const height = bitmap.height - top
-    const canvas = new OffscreenCanvas(bitmap.width, height)
+    const left = Math.floor(bitmap.width * region.x)
+    const top = Math.floor(bitmap.height * region.y)
+    const width = Math.min(bitmap.width - left, Math.ceil(bitmap.width * region.width))
+    const height = Math.min(bitmap.height - top, Math.ceil(bitmap.height * region.height))
+    const canvas = new OffscreenCanvas(width, height)
     const context = canvas.getContext('2d')
     if (!context) throw new Error('A detail image could not be prepared.')
     context.filter = 'contrast(1.2)'
-    context.drawImage(bitmap, 0, top, bitmap.width, height, 0, 0, bitmap.width, height)
+    context.drawImage(bitmap, left, top, width, height, 0, 0, width, height)
     const crop = await canvas.convertToBlob({ type: 'image/png' })
     const results = await engine.predict(crop, {
       textDetLimitType: 'max', textDetLimitSideLen: DETAIL_DETECTION_MAX_SIDE,
@@ -186,13 +256,13 @@ async function recognizeFooter(file: File, fullResult: OcrResult, engine: OcrEng
     })
     if (results.length !== 1) throw new Error('Detail OCR returned an unexpected page count.')
     const result = results[0]
-    if (result.image?.width !== bitmap.width || result.image?.height !== height) {
+    if (result.image?.width !== width || result.image?.height !== height) {
       throw new Error('Detail OCR returned inconsistent coordinates.')
     }
     return {
       ...result,
       image,
-      items: result.items.map((item) => ({ ...item, poly: item.poly?.map(([x, y]) => [x, y + top]) })),
+      items: result.items.map((item) => ({ ...item, poly: item.poly?.map(([x, y]) => [x + left, y + top]) })),
     }
   } finally {
     bitmap.close()
@@ -250,26 +320,38 @@ function maskQr(image: ImageData, bounds: QrBounds): void {
   }
 }
 
-async function decodeQrUrls(file: File, decoderPromise: Promise<QrDecoder | null>): Promise<DecodedQrUrl[]> {
+async function decodeQrUrls(
+  file: File, decoderPromise: Promise<QrDecoder | null>, signal: AbortSignal,
+): Promise<QrDecodeResult> {
   let bitmap: ImageBitmap | undefined
+  const urls = new Map<string, BoundingBox>()
+  let reachedTimeLimit = false
   try {
     const decode = await decoderPromise
-    if (!decode) return []
+    if (!decode || signal.aborted) return { urls: [], reachedTimeLimit: signal.aborted }
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+    if (signal.aborted) return { urls: [], reachedTimeLimit: true }
     const scale = Math.min(1, QR_MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height))
     const width = Math.round(bitmap.width * scale)
     const height = Math.round(bitmap.height * scale)
-    if (!width || !height) return []
+    if (!width || !height) return { urls: [], reachedTimeLimit: false }
     const context = new OffscreenCanvas(width, height).getContext('2d', { willReadFrequently: true })
-    if (!context) return []
+    if (!context) return { urls: [], reachedTimeLimit: false }
     context.drawImage(bitmap, 0, 0, width, height)
 
-    const urls = new Map<string, BoundingBox>()
+    const scanStartedAt = performance.now()
+    const budgetExhausted = () => {
+      if (signal.aborted || performance.now() - scanStartedAt >= QR_SCAN_BUDGET_MS) reachedTimeLimit = true
+      return reachedTimeLimit
+    }
     for (const top of tileStarts(height)) {
+      if (budgetExhausted()) break
       for (const left of tileStarts(width)) {
+        if (budgetExhausted()) break
         const tile = context.getImageData(left, top,
           Math.min(QR_TILE_SIZE, width - left), Math.min(QR_TILE_SIZE, height - top))
         for (let count = 0; count < QR_MAX_CODES_PER_TILE; count++) {
+          if (budgetExhausted()) break
           const code = decode(tile.data, tile.width, tile.height, { inversionAttempts: 'dontInvert' })
           if (!code) break
           const url = webUrl(code.data)
@@ -286,26 +368,28 @@ async function decodeQrUrls(file: File, decoderPromise: Promise<QrDecoder | null
         }
       }
     }
-    return [...urls].map(([url, box]) => ({ url, box }))
   } catch {
-    // QR decoding is best-effort. The image still gets its normal OCR result.
-    return []
+    // QR is best-effort; a later failure does not erase URLs already decoded.
   } finally {
     bitmap?.close()
   }
+  return { urls: [...urls].map(([url, box]) => ({ url, box })), reachedTimeLimit }
 }
 
-async function qrUrlsWithoutDelayingOcr(promise: Promise<DecodedQrUrl[]>): Promise<DecodedQrUrl[]> {
+async function qrUrlsWithoutDelayingOcr(
+  promise: Promise<QrDecodeResult>, controller: AbortController,
+): Promise<QrDecodeResult> {
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
       promise,
-      new Promise<DecodedQrUrl[]>((resolve) => {
-        timeout = setTimeout(() => resolve([]), QR_EXTRA_WAIT_MS)
+      new Promise<QrDecodeResult>((resolve) => {
+        timeout = setTimeout(() => resolve({ urls: [], reachedTimeLimit: true }), QR_EXTRA_WAIT_MS)
       }),
     ])
   } finally {
     clearTimeout(timeout)
+    controller.abort()
   }
 }
 
@@ -332,6 +416,7 @@ export async function recognizeImages(
   let remainingSpans = 600
   let detectionMs: number | null = 0
   let recognitionMs: number | null = 0
+  let qrMs: number | null = 0
   let detailPasses = 0
   const recoveryWarnings: string[] = []
 
@@ -344,7 +429,12 @@ export async function recognizeImages(
 
   for (const [index, file] of files.entries()) {
     let result: OcrResult[]
-    const qrUrlsPromise = decodeQrUrls(file, qrDecoderPromise)
+    const qrController = new AbortController()
+    const qrStartedAt = performance.now()
+    let pageQrMs: number | null = null
+    const qrUrlsPromise = decodeQrUrls(file, qrDecoderPromise, qrController.signal).finally(() => {
+      pageQrMs = Math.round(performance.now() - qrStartedAt)
+    })
     try {
       result = await engine.predict(file, {
         textDetLimitType: 'max',
@@ -353,26 +443,34 @@ export async function recognizeImages(
         textRecScoreThresh: 0,
       })
     } catch (error) {
+      qrController.abort()
       throw new Error(`Could not read image ${index + 1}. Use a JPEG, PNG, or WebP image supported by this browser.`, { cause: error })
     }
     if (result.length !== 1) {
+      qrController.abort()
       throw new Error(`OCR returned ${result.length} pages for image ${index + 1}; expected one.`)
     }
     let page = pageText(result[0])
     recordMetrics(result[0])
-    try {
-      const detail = await recognizeFooter(file, result[0], engine)
-      if (detail) {
+    for (const region of detailRegions(result[0])) {
+      try {
+        const detail = await recognizeDetail(file, result[0], engine, region)
         detailPasses += 1
         recordMetrics(detail)
         page = addDetailText(page, pageText(detail))
+      } catch {
+        const location = region.y === BOTTOM_EDGE_REGION_START && region.height === 1 - BOTTOM_EDGE_REGION_START
+          ? 'the lower edge' : 'a small or uncertain text region'
+        recoveryWarnings.push(`Page ${index + 1}: ${location} could not be checked. Some details may be missing; upload a clearer photo or a close-up of this area.`)
       }
-    } catch {
-      recoveryWarnings.push(`Page ${index + 1}: small text in the lower part could not be checked. Compare the footer with the photo, especially contact details, before relying on the result.`)
     }
-    const qrUrls = await qrUrlsWithoutDelayingOcr(qrUrlsPromise)
-    if (qrUrls.length) {
-      for (const { url, box } of qrUrls) {
+    const qr = await qrUrlsWithoutDelayingOcr(qrUrlsPromise, qrController)
+    qrMs = qrMs !== null && pageQrMs !== null ? qrMs + pageQrMs : null
+    if (qr.reachedTimeLimit) {
+      recoveryWarnings.push(`Page ${index + 1}: QR scan reached its time limit; some code destinations could not be read. Printed text was still analyzed.`)
+    }
+    if (qr.urls.length) {
+      for (const { url, box } of qr.urls) {
         const qrText = `Decoded QR code URL (not opened): ${url}`
         page.text = page.text ? `${page.text}\n${qrText}` : qrText
         if (qrText.length <= 500) page.spans.push({ text: qrText, box })
@@ -384,10 +482,6 @@ export async function recognizeImages(
     onProgress?.(index + 1, files.length)
   }
 
-  if (pages.every((page) => page.text.length === 0)) {
-    throw new Error('No text was recognized in these images. Try a sharper, well-lit photo.')
-  }
-
   const finishedAt = performance.now()
   return {
     pages,
@@ -397,6 +491,7 @@ export async function recognizeImages(
     modelState,
     detectionMs: detectionMs === null ? null : Math.round(detectionMs),
     recognitionMs: recognitionMs === null ? null : Math.round(recognitionMs),
+    qrMs,
     detailPasses,
     recoveryWarnings,
   }

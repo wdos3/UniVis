@@ -122,7 +122,7 @@ function App() {
   }
 
   function updateResult(updated: AnalysisResult) {
-    setPhotoTimings(null)
+    invalidateOcrDraft()
     if (updated.id === resultImageOwnerId.current && resultImageUrls.current.length && updated.source_pages.length === resultImageUrls.current.length) {
       setResult({
         ...updated,
@@ -173,6 +173,7 @@ function App() {
     setBusy(true); setError('')
     try {
       const analyzed = await api.analyze(text, provider)
+      invalidateOcrDraft()
       showResult(analyzed); setQuestions(activeDemo?.questions ?? []); setActiveTab('visual')
     } catch (problem) { setError(problem instanceof Error ? problem.message : 'Analysis failed.') }
     finally { setBusy(false) }
@@ -225,11 +226,11 @@ function App() {
     })
     if (selectionVersion !== imageSelectionVersion.current) return
     setResult(attachLocalImages(analyzed, pages))
-    setOcrDraft(null)
+    setOcrDraft(draft)
     setShowOcrCorrection(false)
     setSourceCorrections([])
     setQuestions([])
-    setActiveTab('original')
+    setActiveTab('simplified')
   }
 
   async function analyzeImages() {
@@ -265,7 +266,7 @@ function App() {
   }
 
   async function retryImageAnalysis() {
-    if (!ocrDraft || busy || imageAnalysisStatus !== 'ready' || !ocrDraft.pages.some((page) => page.text.trim())) return
+    if (!ocrDraft || busy || imageAnalysisStatus !== 'ready') return
     const pages = [...imagePages]
     if (pages.length !== ocrDraft.imageIds.length || pages.some((page, index) => page.id !== ocrDraft.imageIds[index])) return
     const selectionVersion = imageSelectionVersion.current
@@ -276,6 +277,7 @@ function App() {
       if (selectionVersion === imageSelectionVersion.current) {
         setError(problem instanceof Error ? problem.message : 'Image analysis failed.')
         setSourceCorrections(problem instanceof ApiError ? problem.corrections : [])
+        setShowOcrCorrection(true)
       }
     } finally { setBusy(false); setProcessingImages(false); setProgressStage(0); setOcrCompleted(0) }
   }
@@ -315,24 +317,27 @@ function App() {
           <div className="notice-input-card">
             <div className="input-toolbar"><span><FileText size={16} />Korean notice text</span><span className="character-count">{text.length.toLocaleString()} / 200,000</span></div>
             <textarea ref={textArea} lang="ko" value={text} disabled={busy || showOcrCorrection} onChange={(event) => { setText(event.target.value); setQuestions([]) }} placeholder="공지사항의 한국어 텍스트를 여기에 붙여넣으세요…" />
-            <div className="input-actions"><span>{showOcrCorrection ? 'Photo correction is active above. Edit each page there before retrying; this text box is paused.' : 'Text input remains available for controlled experiments and corrections.'}</span></div>
+            <div className="input-actions"><span>{showOcrCorrection ? 'Photo correction is active above. You can retry without editing Korean; source-text edits are optional.' : 'Text input remains available for controlled experiments and corrections.'}</span></div>
           </div>
           <aside className="demo-card"><span className="eyebrow-text">Start with an example</span><h3>Synthetic notice library</h3><p>Fictional examples exercise deadlines, conditions, documents, and exceptions.</p><div className="demo-list">{demos.map((demo) => <button key={demo.id} disabled={busy} onClick={() => loadDemo(demo.id)}><span>{demo.category}</span><strong>{demo.title}</strong><ArrowRight size={15} /></button>)}</div></aside>
         </div>
         <div className="generate-bar"><label>Semantic provider<select value={provider} disabled={busy} onChange={(event) => setProvider(event.target.value)}><option value="auto">Auto {openaiConfigured ? '(OpenAI)' : '(mock fallback)'}</option><option value="mock">Mock / demo only</option><option value="openai" disabled={!openaiConfigured}>OpenAI {!openaiConfigured && '— key not configured'}</option></select></label><button className="generate-button" disabled={busy || showOcrCorrection || !text.trim()} onClick={generate}>{busy ? <LoaderCircle className="spin" size={18} /> : <WandSparkles size={18} />}{busy ? 'Analyzing…' : 'Generate instructions'}</button></div>
-        <p className="privacy-note"><LockKeyhole size={14} />Notice photos stay in this browser; recognized text and any locally decoded QR URLs are sent to this site's server for translation and analysis. Text-based PDF/TXT uploads and generated results are stored on the server. Extracted text may be sent to the translation service, then bilingual text to the semantic provider.</p>
+        <p className="privacy-note"><LockKeyhole size={14} />Notice photos stay in this browser; recognized text and any locally decoded QR URLs are sent to this site's server for translation and analysis. Text-based PDF/TXT uploads and generated results are stored on the server. Extracted text may be sent to the translation service. The semantic provider receives recognized Korean text; document and text analysis can also include the temporary translation.</p>
         {error && <p className="error-message" role="alert">{error}</p>}
       </section>
 
       {result && <section className="results page-shell">
-        <div className="results-heading"><div><span className="section-number">02</span><div><span className="eyebrow-text">Analysis complete · {result.provider}</span><h2>{result.notice.title}</h2></div></div><div className="result-tools"><label className="toggle"><input type="checkbox" checked={showEvidence} onChange={(event) => setShowEvidence(event.target.checked)} /><span>{showEvidence ? <Eye size={16} /> : <EyeOff size={16} />}{showEvidence ? 'Evidence shown' : 'Show source evidence'}</span></label><button className="secondary-button" onClick={() => window.print()}><Download size={16} />Print / Save PDF</button></div></div>
+        <div className="results-heading"><div><span className="section-number">02</span><div><span className="eyebrow-text">{result.acquisition.english_coverage_status === 'partial' ? 'Partial interpretation' : 'Analysis complete'} · {result.provider}</span><h2>{result.notice.title}</h2></div></div><div className="result-tools"><label className="toggle"><input type="checkbox" checked={showEvidence} onChange={(event) => setShowEvidence(event.target.checked)} /><span>{showEvidence ? <Eye size={16} /> : <EyeOff size={16} />}{showEvidence ? 'Evidence shown' : 'Show source evidence'}</span></label><button className="secondary-button" onClick={() => window.print()}><Download size={16} />Print / Save PDF</button></div></div>
+        {result.acquisition.english_coverage_status === 'partial' && <div className="inline-notice" role="status"><strong>Some details could not be verified.</strong> This is a partial automatic interpretation. Unverified details are withheld and listed as verification gaps. You do not need to type Korean. {result.acquisition.unverified_source_units ?? 0} source line(s) remain unverified.</div>}
+        {result.acquisition.english_coverage_status === 'partial' && ocrDraft && !showOcrCorrection && <div><button className="secondary-button" disabled={busy || imageAnalysisStatus !== 'ready'} onClick={retryImageAnalysis}>{busy ? <LoaderCircle className="spin" size={16} /> : <WandSparkles size={16} />}Retry English interpretation</button><p className="muted">Uses the text already read from your photo. You do not need to type Korean.</p></div>}
+        {result.acquisition.metrics_complete === false && <p className="muted">Known request counts and available token usage are shown; failed provider attempts could not be fully measured.</p>}
         {!result.korean_detected && <div className="inline-notice" role="status">The notice does not appear to be primarily Korean. Analysis was allowed, but the source language should be reviewed.</div>}
         <div className="image-metrics"><div><ImageIcon size={18} /><span>OCR<strong>{result.acquisition.ocr_provider} · {(result.acquisition.ocr_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Translation<strong>{result.acquisition.translation_provider} · {result.acquisition.translation_requests} request(s) · {(result.acquisition.translation_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Semantic step<strong>{result.acquisition.semantic_provider} · {result.acquisition.semantic_requests} call(s) · {(result.acquisition.semantic_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>OpenAI tokens<strong>{result.acquisition.semantic_total_tokens.toLocaleString()}</strong></span></div>{result.source_pages.length > 0 && <><div><span>Pages<strong>{result.acquisition.source_pages}</strong></span></div><div><span>Total pipeline<strong>{(result.acquisition.total_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Facts needing review<strong>{result.acquisition.critical_facts_needing_review}</strong></span></div></>}</div>
         {photoTimings && <PhotoTimings timings={photoTimings} />}
         <div className="condition-tabs" role="tablist" aria-label="Notice presentation conditions">{tabOptions.map((tab) => <button id={`tab-${tab.id}`} role="tab" aria-selected={activeTab === tab.id} aria-controls={`panel-${tab.id}`} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)} key={tab.id}><span>{tab.short}</span>{tab.label}</button>)}</div>
         <div className="tab-panel" id={`panel-${activeTab}`} role="tabpanel" aria-labelledby={`tab-${activeTab}`}>
           {activeTab === 'original' && (result.source_pages.length > 0 ? <OriginalImageView result={result} provider={provider} editable={!publicMode} onUpdated={updateResult} /> : <article className="reading-panel"><div className="reading-meta"><span>Source language</span><strong>Korean</strong></div><div className="prose-output" lang="ko">{result.original_text}</div></article>)}
-          {activeTab === 'translation' && <article className="reading-panel"><div className="reading-meta"><span>Condition A</span><strong>Faithful translation</strong></div><p className="condition-description">Baseline translation preserves detail and structure without deliberate simplification.</p><div className="prose-output">{result.faithful_translation}</div></article>}
+          {activeTab === 'translation' && <article className="reading-panel"><div className="reading-meta"><span>Condition A</span><strong>Faithful translation</strong></div><p className="condition-description">Baseline translation preserves detail and structure without deliberate simplification.</p><div className="prose-output">{result.faithful_translation || 'The temporary translation service was unavailable. Check the English interpretation and verification gaps in the next tabs.'}</div></article>}
           {activeTab === 'simplified' && <article className="reading-panel"><div className="reading-meta"><span>Condition B</span><strong>Simplified text</strong></div><p className="condition-description">Concise, structured English without visual diagrams or icons.</p><div className="prose-output simplified-output">{result.simplified_text}</div></article>}
           {activeTab === 'visual' && <VisualInstructions result={result} showEvidence={showEvidence} />}
         </div>

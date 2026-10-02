@@ -39,6 +39,22 @@ describe('ImageInputPanel', () => {
     expect(analyze).toHaveBeenCalled()
   })
 
+  it('replaces independent notice images while additions stay pages of the same notice', () => {
+    const add = vi.fn()
+    const { container } = render(<ImageInputPanel {...correctionProps} pages={[page]} demos={[]} status="ready" busy={false} processingImages={false} progressStage={0} ocrCompleted={0} onAdd={add} onRemove={vi.fn()} onMove={vi.fn()} onAnalyze={vi.fn()} onLoadDemo={vi.fn()} />)
+    const input = container.querySelector('input[multiple]')!
+    const another = new File(['new image'], 'another-notice.png', { type: 'image/png' })
+    expect(screen.getByText(/Combine images only when they are pages of the same notice/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Upload another notice' }))
+    fireEvent.change(input, { target: { files: [another] } })
+    expect(add).toHaveBeenLastCalledWith([another], 'uploaded_image', true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add another page' }))
+    fireEvent.change(input, { target: { files: [another] } })
+    expect(add).toHaveBeenLastCalledWith([another], 'uploaded_image', false)
+  })
+
   it('explains unsupported browser OCR and prevents image analysis', () => {
     const analyze = vi.fn()
     render(<ImageInputPanel {...correctionProps} pages={[page]} demos={[]} status="unavailable" busy={false} processingImages={false} progressStage={0} ocrCompleted={0} onAdd={vi.fn()} onRemove={vi.fn()} onMove={vi.fn()} onAnalyze={analyze} onLoadDemo={vi.fn()} />)
@@ -63,17 +79,26 @@ describe('ImageInputPanel', () => {
     render(<ImageInputPanel {...correctionProps} pages={[page]} demos={[]} status="ready" busy={false} processingImages={false} progressStage={1} ocrCompleted={1} onAdd={vi.fn()} onRemove={vi.fn()} onMove={vi.fn()} onAnalyze={vi.fn()} onLoadDemo={vi.fn()} recoveredPages={[{ text: '지원 마감', spans: [] }]} onEditRecoveredPage={edit} onRetryAnalysis={retry} />)
 
     expect(screen.getByRole('link', { name: 'Open page photo' })).toHaveAttribute('href', page.previewUrl)
-    expect(screen.getByText(/Editing existing lines keeps their approximate positions/)).toBeInTheDocument()
+    expect(screen.getByText(/You can retry without editing Korean/)).toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: /Page 1 recognized text/i }), { target: { value: '지원 마감 9월 30일' } })
     expect(edit).toHaveBeenCalledWith(0, '지원 마감 9월 30일')
-    fireEvent.click(screen.getByRole('button', { name: 'Retry analysis with corrected text' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry analysis' }))
     expect(retry).toHaveBeenCalledOnce()
   })
 
   it('does not retry a page beyond the server text limit', () => {
     render(<ImageInputPanel {...correctionProps} pages={[page]} demos={[]} status="ready" busy={false} processingImages={false} progressStage={1} ocrCompleted={1} onAdd={vi.fn()} onRemove={vi.fn()} onMove={vi.fn()} onAnalyze={vi.fn()} onLoadDemo={vi.fn()} recoveredPages={[{ text: '가'.repeat(20_001), spans: [] }]} />)
-    expect(screen.getByRole('button', { name: 'Retry analysis with corrected text' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Retry analysis' })).toBeDisabled()
     expect(screen.getByText(/20,001 \/ 20,000/)).toBeInTheDocument()
+  })
+
+  it('allows retrying an empty reading without asking the user to enter Korean', () => {
+    const retry = vi.fn()
+    render(<ImageInputPanel {...correctionProps} pages={[page]} demos={[]} status="ready" busy={false} processingImages={false} progressStage={1} ocrCompleted={1} onAdd={vi.fn()} onRemove={vi.fn()} onMove={vi.fn()} onAnalyze={vi.fn()} onLoadDemo={vi.fn()} recoveredPages={[{ text: '', spans: [] }]} onRetryAnalysis={retry} />)
+
+    expect(screen.getByRole('button', { name: 'Retry analysis' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry analysis' }))
+    expect(retry).toHaveBeenCalledOnce()
   })
 
   it('finds an actionable source correction in the retained page text', () => {
@@ -96,6 +121,6 @@ describe('ImageInputPanel', () => {
     }]} />)
     expect(screen.getByText(/OCR confidence is 56%/)).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: /Page 1 recognized text/i })).toHaveValue('기간입C이끼지')
-    expect(screen.getByRole('button', { name: 'Retry analysis with corrected text' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Retry analysis' })).toBeEnabled()
   })
 })

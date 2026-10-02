@@ -1,0 +1,62 @@
+{
+  "provenance": "Five user-supplied real photographs visually inspected at original resolution on 2026-10-01. Corrected text files are manual transcriptions of each main poster, not raw browser OCR or external-model outputs.",
+  "source_directory": "C:/Users/Lam/Desktop/Coding/Korean Images",
+  "stored_dimensions": [4080, 2296],
+  "exif_orientation": 6,
+  "display_dimensions": [2296, 4080],
+  "photos": [
+    {
+      "id": "sogang_undergrad_research",
+      "filename": "KakaoTalk_20260916_180230755_01.jpg",
+      "bytes": 3032473,
+      "sha256": "86098d06a4e56d0d2e418c8bd4f72bf822446958453799cdd0008a07e98164c6",
+      "notice_type": "undergraduate research funding",
+      "fixture": "sogang_undergrad_research_photo_corrected.txt",
+      "existing_identical_image": "data/uploads/image-165422105708/page-001-a8eeb288-original.jpg",
+      "review_requests": ["Small top-right university posting seal: slogan and handwritten posting-period digits were not completely verified. The main-poster transcription excludes this separate seal; do not infer its text or posting dates."],
+      "critical_checks": ["Recognized research courses AND receiving research supervision", "Confirm recognized courses with the innovation team", "Maximum KRW 300,000 per person", "Two payments; second payment only after submitting results report", "Four submission documents through S plus", "September 7 to October 5, 2026", "Same research funded by creative-convergence program restricts support AND participation", "Exact phone and email"]
+    },
+    {
+      "id": "sogang_creative_research",
+      "filename": "KakaoTalk_20260916_180230755_02.jpg",
+      "bytes": 2931759,
+      "sha256": "55ac8b6ecc218aee5d552a10541a6de9502e7fde1d4facbad404e2a3ac32fd3c",
+      "notice_type": "team research recruitment and two funding categories",
+      "fixture": "sogang_creative_research_photo_corrected.txt",
+      "existing_related_fixture": "sogang_research_corrected.txt",
+      "review_requests": ["Top-right posting seal is partially clipped at the image edge; its tiny slogan and handwritten posting-period values were not completely verified. The main-poster transcription excludes this separate seal."],
+      "critical_checks": ["Application dates and three documents via S Plus", "Enrolled undergraduate condition", "Students on leave may participate but receive neither research funding nor activity allowance", "Team size 2 to 5", "Other on-campus same/similar supported research restrictions, including printed undergraduate-research-support-program example", "No duplicate participation", "All designated topic options and independently chosen topic", "Research funding maximum KRW 200,000 per person versus activity allowance KRW 200,000 per person", "Equipment purchase/rental, materials, books, printing; card payment at in-person center visit", "Other supported costs paid as scholarship", "Exact phone and email; QR labels without guessed target URLs"]
+    },
+    {
+      "id": "seoul_fair_price",
+      "filename": "KakaoTalk_20260916_180230755_03.jpg",
+      "bytes": 2921713,
+      "sha256": "eba415d0651c1c43ecc2fb1b74d3bd5d75516fe10a68452042df4e83e62bd130",
+      "notice_type": "city promotion, discovery methods, voucher benefits and survey",
+      "fixture": "seoul_fair_price_photo_corrected.txt",
+      "review_requests": [],
+      "critical_checks": ["All three business-discovery methods", "September 14 to November 30, 2026; early end if budget exhausted", "Pay with Seoul Love vouchers at qualifying businesses for 5 percent payback", "Per-person MONTHLY maximum KRW 50,000", "Survey only after using a qualifying business; KRW 5,000 voucher awarded by lottery", "Illustrated shop-category labels are examples, not named establishments or actual addresses", "QR labels preserved; target URLs require actual local QR decode, never inference"]
+    },
+    {
+      "id": "sogang_ai_video_contest",
+      "filename": "KakaoTalk_20260916_180230755_04.jpg",
+      "bytes": 3034492,
+      "sha256": "c4098a6b6c69360cd9c594efd5c2de0ae5d3a209d6b0296c264af3e4648ab129",
+      "notice_type": "video contest with two-dimensional prize table",
+      "fixture": "sogang_ai_video_contest_photo_corrected.txt",
+      "review_requests": ["Two neighboring UBF posters below the main contest poster are only partly photographed. Their full instructions cannot be reconstructed. Analyze the main contest region or request complete separate photos for those posters."],
+      "critical_checks": ["Sustainability issues found in society OR on campus", "September 1 to October 11, 2026 entry period", "Undergraduate enrollment; students on leave may enter", "Individual entry OR team maximum 3 people", "One video; AI use permitted, not mandatory", "At least FHD 1080p; runtime 30 seconds to 2 minutes", "Apply via Splus; results October 19 by individual notice", "Top prize ONE work: team KRW 1,000,000 versus individual KRW 500,000", "Excellence prize THREE works: team KRW 500,000 versus individual KRW 250,000", "Participation S plus mileage credit", "October 26 ceremony with winning-work exhibition and at least one winner attending", "Contest guidelines via Splus and exact iges@sogang.ac.kr contact"]
+    },
+    {
+      "id": "kcci_hiring",
+      "filename": "KakaoTalk_20260916_180230755_06.jpg",
+      "bytes": 3048691,
+      "sha256": "99bef2caaefb08cdbd9f20b009119945b551d87077c5f34f3d53c189b66a25af",
+      "notice_type": "employment recruitment with six-column test/score table and selection stages",
+      "fixture": "kcci_2027_corrected.txt",
+      "existing_identical_image": "data/uploads/image-d21762e85663/page-001-08288e4b-original.jpg",
+      "review_requests": ["Printed recruitment count is literally 0명. Do not treat this recruiting notation as a confirmed zero-vacancy announcement or substitute an invented headcount."],
+      "critical_checks": ["All six test/score pairs with one-or-more requirement and two-year score-validity condition", "No education/major/gender/age restriction; graduates or expected February 2027 graduates", "Male military-service/exemption and overseas-travel conditions", "All job fields and preferences", "September 14 to September 30, 2026 at 18:00; internet only, no visit/mail/email", "All six selection stages, printed dates and subtypes; dates may change except application stage", "Required academic/English scores in application; prohibited identifying information in personal statement", "False application/documents revoke acceptance and employment", "Supporting documents submitted at interview", "Seoul workplace; three-month probation then evaluation before regular conversion", "Application-site Q&A contact"]
+    }
+  ]
+}

@@ -25,7 +25,14 @@ source unit; removing an unsupported claim does not license skipping source text
 The same audit checks displayed English claims, including summaries and review
 notes. It can reject a model-invented consequence even when its quoted Korean
 exists; affected source units then require complete grounded details.
-Exact dates, amounts, contacts, literal English phrases, research-support scope,
+Local wording correction uses evidence-backed glossary terms only; it does not replace
+whole sentences with translations of a remembered poster. Missing clauses must pass
+the independent semantic audit. Invalid audit assignments are removed before a
+focused retry; grouped facts are retried together, unknown IDs require broader review,
+and repeated invalid responses are never accepted. Strict APIs reject them; opt-in
+photo mode withholds affected claims and returns English gaps. There are at most two
+audit requests. Partial pruning uses each item's own provenance before coalescing.
+Exact dates, amounts, contacts, literal English phrases, recognized source conditions,
 and common spending clauses have additional deterministic checks. These checks have bounded
 vocabularies and do not prove arbitrary semantic meaning or negation.
 
@@ -38,7 +45,7 @@ Three provider boundaries keep acquisition, translation, and semantic interpreta
 - `PaddleOcrProvider` runs the lightweight PP-OCRv5 detector and Korean recognizer locally, then assembles ordered page text. `RemotePaddleOcrProvider` sends the same ordered image bytes to the dedicated authenticated OCR container when `PADDLEOCR_SERVICE_URL` is configured. Both providers share the same result contract and preserve page-level warnings.
 - `TranslationProvider` performs translation without interpretation. MyMemory is the temporary no-key adapter and splits input below its byte limit, preserving blank paragraph/column boundaries and whole OCR lines where possible; `LibreTranslateProvider` supports a later self-hosted replacement.
 - `SemanticProvider` converts Korean OCR plus its machine translation into a strict `NoticeData` response. The live OpenAI provider makes an initial structured-output request, then translates any Korean left in user-facing English fields in one or more batched follow-up calls. Mock providers keep the five synthetic demos local.
-- The English completeness service compares distinct substantive recovered source lines with the actual cited English display fields and digest. It can append grounded details to `key_details` or `financial_support`, retry unresolved audit classifications once, or reject a result if substantive meaning cannot be accounted for. The resulting calls and tokens are included in semantic metrics. This is a safeguard, not a guarantee of semantic correctness or recovery of text OCR missed.
+- The English completeness service compares distinct substantive recovered source lines with the actual cited English display fields and digest. It can append grounded details to `key_details` or `financial_support`, retry unresolved or malformed source/English-ID classifications once, or reject a result if substantive meaning cannot be accounted for. The resulting calls and tokens are included in semantic metrics. This is a safeguard, not a guarantee of semantic correctness or recovery of text OCR missed.
 
 Image services preserve the uploaded original, apply EXIF orientation, create a mildly enhanced working copy, report heuristic quality issues, and detect QR codes without opening them. Images are not included in the OpenAI request. Overlapping heading and full-page OCR passes improve poster recovery while preserving uncertainty for review.
 
@@ -122,6 +129,12 @@ Camera photo / image pages / PDF / Korean text
                               add grounded English detail or fail
                                     |
                                     v
+                            photo final English support check
+                              one bounded classification request
+                              withhold unsupported final wording
+                              recover literal score pairs as printed tables
+                                    |
+                                    v
                             NoticeData validation
                               + fidelity/coverage report
                               + deterministic templates
@@ -134,3 +147,34 @@ Camera photo / image pages / PDF / Korean text
 ## Long notices
 
 The text API accepts at most 200,000 characters and still relies on translation-service quotas and the semantic model context window. MyMemory input is split below its 500-byte query limit, which can consume multiple free requests for one notice. The completeness audit currently caps recovered source units at 120 and can make an additional model request; beyond that limit or when text remains ambiguous, the API returns an error instead of publishing a digest. Local image input is limited to 12 ordered pages, 15 MB per page, and 50 MB total; the browser-OCR text endpoint permits 12 pages, 20,000 characters per page, and 50,000 total. Production work should replace the temporary public translator and add section-aware semantic chunking with cross-page source-fact reconciliation.
+
+## Photo continuity and partial interpretation
+
+The photo UI opts into `allow_partial=true`; the API default remains strict. This
+is a reporting/recovery choice, not a different semantic model. Preflagged damaged
+contacts and ambiguous score-table tokens cannot become guessed facts. After at most
+two audits, valid independent facts may be presented with an explicit partial status,
+source-unit count, and English page/line gaps. Unsafe dependent primary claims and
+free context are withheld. Raw Korean remains in the Original/evidence views, not
+in the English digest as an unmapped-line substitute.
+
+Photo extraction uses a compact schema: exact quoted evidence remains model output,
+while fact IDs are assigned locally. Identical quotes on the same page share IDs,
+preserving separate document checklist items. The MyMemory baseline is displayed
+separately and is omitted from photo semantic prompts. The final support check
+classifies the actual final English after all repairs, without writing replacements.
+Provider-generated review prose is replaced by application-owned English gaps.
+Unassociated table cells and short generic captions are withheld; this conservative
+check can also withhold legible information. Positioned English-score pairs can be
+restored as explicitly printed table rows with applicability unverified; geometry
+does not independently establish eligibility. SDK automatic retries are disabled
+and production model requests use a 45-second timeout. The final check's measured
+latency is separate from coverage latency; neither stage is added twice to totals.
+
+A failed translator can be bypassed for interpretation from Korean source text,
+while the baseline translation is explicitly unavailable. Provider failures or input
+too long to verify can produce an English unavailable state with no factual
+instructions. `metrics_complete=false` distinguishes partial call/token accounting
+from fully measured responses. Local photos remain available; none of these paths
+requires the user to transcribe Korean. Input limits, rate limits, unsupported
+browsers, connectivity failures, and legibility limits still exist.

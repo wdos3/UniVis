@@ -10,7 +10,7 @@ from app.services.images.models import PreparedImage
 from app.services.ocr import OcrResult, choose_ocr_provider
 from app.services.semantic import SemanticResult, SourceCorrectionRequired, choose_semantic_provider
 from app.services.source_contacts import contact_corrections
-from app.services.translation import TranslationResult, choose_translation_provider
+from app.services.translation import TranslationError, TranslationResult, choose_translation_provider
 
 
 @dataclass(frozen=True)
@@ -32,11 +32,15 @@ class PipelineResult:
     extraction_latency_ms: int = 0
     english_repair_latency_ms: int = 0
     coverage_latency_ms: int = 0
+    english_verification_latency_ms: int = 0
     total_latency_ms: int = 0
     warnings: list[str] = field(default_factory=list)
     ocr_provider: str = "not_applicable"
     ocr_status: str = "not_applicable"
     page_texts: list[str] = field(default_factory=list)
+    english_coverage_status: str = "not_audited"
+    unverified_source_units: int = 0
+    metrics_complete: bool = True
 
 
 def _demo_for_images(images: list[PreparedImage]):
@@ -55,21 +59,29 @@ def _demo_for_images(images: list[PreparedImage]):
 
 
 async def analyze_text_pipeline(
-    text: str, target_language: str, provider: str, *, layout_context: str = ""
+    text: str, target_language: str, provider: str, *, layout_context: str = "", allow_partial: bool = False
 ) -> PipelineResult:
     pipeline_started = perf_counter()
     semantic = choose_semantic_provider(provider)
     is_mock = semantic.name == "mock-semantic"
-    if not is_mock and (corrections := contact_corrections(text)):
+    if not is_mock and not allow_partial and (corrections := contact_corrections(text)):
         raise SourceCorrectionRequired("Correct the unreadable phone number in the recovered text and retry.", corrections)
     translator = choose_translation_provider(mock=is_mock)
     translation_started = perf_counter()
-    translation: TranslationResult = await translator.translate(text, "ko", target_language)
+    warnings: list[str] = []
+    try:
+        translation: TranslationResult = await translator.translate(text, "ko", target_language)
+    except TranslationError:
+        if not allow_partial or is_mock:
+            raise
+        translation = TranslationResult(text="", provider="unavailable", request_count=0)
+        warnings.append("The temporary translation service was unavailable. English instructions were interpreted directly from the recovered source; the separate baseline translation is unavailable.")
     translation_latency_ms = round((perf_counter() - translation_started) * 1000)
     semantic_started = perf_counter()
-    structured: SemanticResult = await semantic.analyze(
-        text, translation.text, target_language, layout_context=layout_context
-    )
+    semantic_options = {"layout_context": layout_context}
+    if allow_partial:
+        semantic_options["allow_partial"] = True
+    structured: SemanticResult = await semantic.analyze(text, translation.text, target_language, **semantic_options)
     semantic_latency_ms = round((perf_counter() - semantic_started) * 1000)
     return PipelineResult(
         source_text=text,
@@ -88,7 +100,8 @@ async def analyze_text_pipeline(
         extraction_latency_ms=structured.extraction_latency_ms,
         english_repair_latency_ms=structured.english_repair_latency_ms,
         total_latency_ms=round((perf_counter() - pipeline_started) * 1000),
-        warnings=structured.warnings,
+        warnings=warnings + structured.warnings,
+        metrics_complete=not warnings,
     )
 
 

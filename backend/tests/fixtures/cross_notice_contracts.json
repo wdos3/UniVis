@@ -1,0 +1,55 @@
+{
+  "provenance": "Synthetic Korean notice clauses for deterministic application-contract tests; not photographs or measured model outputs.",
+  "cases": [
+    {
+      "id": "tuition",
+      "units": [
+        {"page": 1, "source": "한길대학교 등록금 납부: 2028년 2월 21일 09:00부터 2028년 2월 25일 16:00까지", "english": "Hangil University tuition payment runs from February 21, 2028 at 09:00 through February 25, 2028 at 16:00.", "category": "other"},
+        {"page": 1, "source": "분할납부 승인자는 1차분 450,000원만 가상계좌로 납부", "english": "Students approved for installment payments must pay only the first installment of KRW 450,000 to their virtual account.", "category": "application"},
+        {"page": 1, "source": "기한 내 미납 시 수강신청이 취소될 수 있으며 현금 납부는 불가", "english": "If payment is not made by the deadline, course registration may be canceled; cash payment is not accepted.", "category": "restriction"}
+      ]
+    },
+    {
+      "id": "housing",
+      "units": [
+        {"page": 1, "source": "푸른대학교 생활관 신청 마감: 2029년 1월 13일 15:30", "english": "The Pureun University residence application deadline is January 13, 2029 at 15:30.", "category": "application"},
+        {"page": 1, "source": "신입생은 여권 사본을 제출하고 재학생은 결핵검사 결과서를 제출", "english": "New students must submit a passport copy, while enrolled students must submit tuberculosis test results.", "category": "application"},
+        {"page": 1, "source": "현재 생활관 거주자는 신청 불가; 보증금 70,000원은 퇴사 후 반환", "english": "Current residence occupants may not apply; the KRW 70,000 deposit is returned after moving out.", "category": "restriction"}
+      ]
+    },
+    {
+      "id": "scholarship",
+      "units": [
+        {"page": 1, "source": "해솔대학교 장학금: 1인당 최대 850,000원, 직전 학기 15학점 이상 이수", "english": "Haesol University offers a scholarship of up to KRW 850,000 per student; applicants must have completed at least 15 credits in the previous semester.", "category": "funding"},
+        {"page": 1, "source": "신청 마감: 2030년 11월 22일 12:00; 교환학생은 지원 대상에서 제외", "english": "The application deadline is November 22, 2030 at 12:00; exchange students are excluded from eligibility for support.", "category": "eligibility"},
+        {"page": 2, "source": "필수 서류: 신청서와 성적증명서; 봉사활동 증명서는 선택 제출", "english": "An application form and academic transcript are required; submitting a volunteer service certificate is optional.", "category": "application"},
+        {"page": 2, "source": "PDF 파일을 grants@example.edu로 제출; 우편 접수는 받지 않음", "english": "Submit PDF files to grants@example.edu; applications by post are not accepted.", "category": "application"}
+      ]
+    },
+    {
+      "id": "course_registration",
+      "units": [
+        {"page": 1, "source": "다온대학교 수강신청: 신입생 2028년 3월 4일 10:00부터 12:00까지", "english": "Daon University course registration for new students is on March 4, 2028 from 10:00 to 12:00.", "category": "application"},
+        {"page": 1, "source": "재학생 수강신청: 2028년 3월 6일 14:00부터 16:00까지", "english": "Course registration for enrolled students is on March 6, 2028 from 14:00 to 16:00.", "category": "application"},
+        {"page": 1, "source": "졸업예정자는 지도교수 승인을 받은 경우에만 21학점까지 신청 가능", "english": "Students expecting to graduate may register for up to 21 credits only if they have their academic advisor's approval.", "category": "eligibility"}
+      ]
+    },
+    {
+      "id": "hiring",
+      "units": [
+        {"page": 1, "source": "새빛재단 채용 마감: 2029년 7월 19일 18:30", "english": "The Saebit Foundation recruitment deadline is July 19, 2029 at 18:30.", "category": "application"},
+        {"page": 1, "source": "영어 성적은 TOEIC 860점 이상 또는 TOEFL iBT 97점 이상 중 하나 충족", "english": "Meet either one of the English-score thresholds: TOEIC 860 or higher, or TOEFL iBT 97 or higher.", "category": "eligibility"},
+        {"page": 1, "source": "온라인 지원만 가능하며 이메일 접수는 불가; 경력증명서는 경력자만 제출", "english": "Only online applications are accepted; email applications are not accepted. Only applicants with work experience must submit a certificate of employment.", "category": "application"}
+      ]
+    },
+    {
+      "id": "event",
+      "units": [
+        {"page": 1, "source": "은하대학교 안전교육: 2031년 5월 27일 13:00, 미래관 402호", "english": "Eunha University safety training takes place on May 27, 2031 at 13:00 in Mirae Hall, room 402.", "category": "other"},
+        {"page": 1, "source": "참가비 12,500원은 환불 불가; 온라인 참여자는 참가비 면제", "english": "The KRW 12,500 participation fee is nonrefundable; online participants are exempt from the fee.", "category": "other"},
+        {"page": 1, "source": "팀은 3~7명으로 구성하며 연구실 안전교육 이수자만 장비 사용 가능", "english": "Each team must consist of 3 to 7 people, and only participants who completed laboratory safety training may use the equipment.", "category": "eligibility"},
+        {"page": 1, "source": "문의: 운영팀 051-987-6543 또는 safety@example.edu", "english": "Contact the Operations Team at 051-987-6543 or safety@example.edu.", "category": "other"}
+      ]
+    }
+  ]
+}

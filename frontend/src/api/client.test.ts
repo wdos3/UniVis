@@ -24,6 +24,7 @@ describe('client-side OCR analysis request', () => {
       input_type: 'camera_photo',
       provider: 'auto',
       target_language: 'en',
+      allow_partial: true,
     })
   })
 

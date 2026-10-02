@@ -15,6 +15,7 @@ from app.services.demos import match_demo
 from app.services.extraction.reconciliation import evidence_matches_page, exact_values
 from app.services.grounded_wording import correct_grounded_wording
 from app.services.source_contacts import contact_corrections, email_values, phone_digits, phone_values
+from app.services.source_grounding import retain_source_grounded_items
 
 
 class SemanticError(RuntimeError):
@@ -55,7 +56,7 @@ class SemanticProvider(ABC):
 
     @abstractmethod
     async def analyze(
-        self, source_text: str, translation: str, target_language: str, *, layout_context: str = ""
+        self, source_text: str, translation: str, target_language: str, *, layout_context: str = "", allow_partial: bool = False
     ) -> SemanticResult:
         """Convert bilingual text into typed visual-instruction data."""
 
@@ -64,7 +65,7 @@ class MockSemanticProvider(SemanticProvider):
     name = "mock-semantic"
 
     async def analyze(
-        self, source_text: str, translation: str, target_language: str, *, layout_context: str = ""
+        self, source_text: str, translation: str, target_language: str, *, layout_context: str = "", allow_partial: bool = False
     ) -> SemanticResult:
         demo = match_demo(source_text)
         if not demo:
@@ -94,12 +95,12 @@ The OCR source can contain labeled, overlapping OCR passes. Reconcile their dupl
 Never infer missing facts. Preserve every date, time, amount, qualification, exception, optional condition, contact, URL, and table-row distinction.
 Keep Latin acronyms exactly as printed. Do not expand an acronym unless its expansion is explicitly present in the source.
 Spatial OCR hints give text positions on a 0-1000 page grid. In a table, pair a heading and its value by horizontal alignment, not by the OCR or translation reading order. If alignment is uncertain, report the unpaired text for review instead of guessing.
-Extract all applicant requirements and score options, work or program duties, preferred qualifications, process stages, employment terms, and application-writing restrictions. Use key_details for grounded information that has no more specific field. A short summary is not a substitute for these details.
+Adapt to the notice's actual content: applications, hiring, fees, housing, courses, scholarships, public benefits, events, and other announcements. Extract every meaningful requirement, option, benefit, duty, process stage, and restriction. Use key_details for grounded information that has no more specific field. A short summary is not a substitute for these details.
 User-facing text must be in the requested target language. Keep Korean only in source_evidence and source_facts.source_text. Do not output "N/A" for absent contact fields; leave them empty.
 For English output, translate every user-facing Korean phrase yourself even if the temporary translation is garbled. Never copy Korean OCR wording into a user-facing field.
 Money awarded or reimbursed to participants belongs in financial_support. Use fees only for money applicants must pay. Keep these directions of payment distinct.
-When a notice says to visit an institute for card payment of funded research purchases, describe that as a funding-use procedure, not merely as a location.
-For research-expense card payments, describe the required visit and payment procedure. Do not imply that a research grant is disbursed by card or that the stated procedure is optional.
+Preserve who pays or receives money, permitted spending, payment procedures, caps, installments, and prerequisites. Preserve AND/OR choices, negations, scope, and conditional relationships; do not turn a mandatory procedure into an option or a conditional benefit into an unconditional award.
+If a photo includes multiple unrelated notices or a cut-off neighboring poster, report the distinct/cropped content for review rather than blending its requirements into one notice.
 Create sequential source facts F001, F002, and so on. Every actionable or factual output item must reference valid source_fact_ids and quote Korean source_evidence exactly.
 Every critical source fact must be represented by at least one grounded output item: use financial_support for funding and fees for payments owed, deadlines for dates, eligibility/audience for qualifications, actions for submission details, warnings/consequences for payment conditions or restrictions, contacts/links for contact data, and key_details for other factual sections. Do not leave a critical source fact referenced only by source_facts.
 For a table-row pairing, source_evidence may quote its exact Korean header and value as separate lines. Mark the item needs_review if the source layout is ambiguous.
@@ -134,6 +135,22 @@ class _SemanticNotice(NoticeData):
         return schema
 
 
+class _PhotoSemanticNotice(_SemanticNotice):
+    """Generate meanings and exact quotations; assign redundant IDs locally."""
+
+    @classmethod
+    def model_json_schema(cls, *args, **kwargs) -> dict:
+        schema = super().model_json_schema(*args, **kwargs)
+        for node in (schema, *schema.get("$defs", {}).values()):
+            properties = node.get("properties", {})
+            for name in ("source_facts", "source_fact_ids"):
+                properties.pop(name, None)
+            if "required" in node:
+                node["required"] = [name for name in node["required"] if name not in {"source_facts", "source_fact_ids"}]
+        schema.get("$defs", {}).pop("SourceFact", None)
+        return schema
+
+
 class OpenAISemanticProvider(SemanticProvider):
     name = "openai-semantic"
 
@@ -141,14 +158,14 @@ class OpenAISemanticProvider(SemanticProvider):
         api_key = os.getenv("OPENAI_API_KEY")
         if client is None and not api_key:
             raise SemanticError("OPENAI_API_KEY is not configured.")
-        self.client = client or AsyncOpenAI(api_key=api_key)
+        self.client = client or AsyncOpenAI(api_key=api_key, max_retries=0, timeout=45)
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
     async def analyze(
-        self, source_text: str, translation: str, target_language: str, *, layout_context: str = ""
+        self, source_text: str, translation: str, target_language: str, *, layout_context: str = "", allow_partial: bool = False
     ) -> SemanticResult:
         corrections = contact_corrections(source_text)
-        if corrections:
+        if corrections and not allow_partial:
             examples = "; ".join(
                 f"Page {item['page']}, line {item['line']}: {item['text']}" for item in corrections[:3]
             )
@@ -164,8 +181,14 @@ class OpenAISemanticProvider(SemanticProvider):
             f"EXACT VALUES DETECTED LOCALLY: {json.dumps(values, ensure_ascii=False)}\n\n"
             f"KOREAN OCR SOURCE:\n{source_text}\n\n"
             f"{layout_block}"
-            f"TEMPORARY MACHINE TRANSLATION:\n{translation}\n\n"
-            "Return all semantic fields in the requested target language. Application-owned provenance and settings are assigned locally."
+            # Photo semantics uses Korean evidence directly. The separately
+            # displayed MyMemory baseline can be noisy and repeats the input.
+            + (f"TEMPORARY MACHINE TRANSLATION:\n{translation}\n\n" if not allow_partial else "")
+            + "Return all semantic fields in the requested target language. Application-owned provenance and settings are assigned locally."
+            + (" Unreadable OCR is not evidence for a guessed fact. Omit undecipherable details, especially phone digits, "
+               "and describe their uncertainty in English. Interpret legible source details directly from Korean. "
+               "Source fact IDs and the source-fact inventory are assigned by the application from your exact source_evidence quotations; do not generate them."
+               if allow_partial else "")
         )
         extraction_started = perf_counter()
         try:
@@ -175,7 +198,7 @@ class OpenAISemanticProvider(SemanticProvider):
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                text_format=_SemanticNotice,
+                text_format=_PhotoSemanticNotice if allow_partial else _SemanticNotice,
             )
         except Exception as exc:
             raise SemanticError("The OpenAI semantic provider could not structure the translated notice.") from exc
@@ -187,6 +210,8 @@ class OpenAISemanticProvider(SemanticProvider):
         notice = NoticeData.model_validate(response.output_parsed.model_dump())
         notice.source_language = "ko"
         notice.target_language = target_language
+        if allow_partial:
+            notice = retain_source_grounded_items(notice, source_text)
         notice = normalize_notice(notice, source_text=source_text)
         extraction_latency_ms = round((perf_counter() - extraction_started) * 1000)
         repair_started = perf_counter()

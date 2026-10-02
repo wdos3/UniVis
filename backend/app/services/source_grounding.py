@@ -19,23 +19,29 @@ def retain_source_grounded_items(notice: NoticeData, source_text: str) -> Notice
     """
     grounded = notice.model_copy(deep=True)
     segments = PAGE_MARKER_PATTERN.split(source_text)
-    pages = [segments[0], *segments[2::2]] if len(segments) > 1 else segments
+    pages = (
+        {int(segments[index]): segments[index + 1] for index in range(1, len(segments), 2)}
+        if len(segments) > 1 else {1: source_text}
+    )
 
-    def exists(evidence: str) -> bool:
-        return any(evidence_matches_page(evidence, page) for page in pages)
+    def exists(evidence: str, source_page: int | None = None) -> bool:
+        if source_page is not None:
+            return source_page in pages and evidence_matches_page(evidence, pages[source_page])
+        return any(evidence_matches_page(evidence, page) for page in [segments[0], *pages.values()])
 
     next_id = max((int(fact.id[1:]) for fact in grounded.source_facts), default=0) + 1
-    grounded.source_facts = [fact for fact in grounded.source_facts if exists(fact.source_text)]
+    grounded.source_facts = [fact for fact in grounded.source_facts if exists(fact.source_text, fact.source_page)]
     facts_by_id = {fact.id: fact for fact in grounded.source_facts}
     for field in GROUNDED_FIELDS:
         retained = []
         for item in getattr(grounded, field):
-            if not exists(item.source_evidence):
+            if not exists(item.source_evidence, item.source_page):
                 continue
             evidence = re.sub(r"\s+", "", item.source_evidence)
             related_ids = [
                 fact_id for fact_id in item.source_fact_ids
                 if (fact := facts_by_id.get(fact_id)) is not None
+                and (fact.source_page is None or item.source_page is None or fact.source_page == item.source_page)
                 and (
                     re.sub(r"\s+", "", fact.source_text) in evidence
                     or evidence in re.sub(r"\s+", "", fact.source_text)
@@ -43,6 +49,12 @@ def retain_source_grounded_items(notice: NoticeData, source_text: str) -> Notice
             ]
             if related_ids != item.source_fact_ids:
                 item.state = ReviewState.NEEDS_REVIEW
+            if not related_ids:
+                related_ids = [
+                    fact.id for fact in grounded.source_facts
+                    if fact.source_page == item.source_page
+                    and re.sub(r"\s+", "", fact.source_text) == evidence
+                ]
             if not related_ids:
                 fact = SourceFact(
                     id=f"F{next_id:03d}", kind="source_grounded_evidence",

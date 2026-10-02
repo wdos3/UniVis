@@ -35,6 +35,9 @@ export interface SourcePage {
   width: number; height: number; readable: boolean; quality_issues: ImageQualityIssue[]; qr_codes: QRCode[]
 }
 export interface ImageAcquisitionReport {
+  english_coverage_status?: 'not_audited' | 'audited' | 'partial'
+  unverified_source_units?: number
+  metrics_complete?: boolean
   input_type: 'text' | 'pdf_text' | 'camera_photo' | 'uploaded_image' | 'image_pdf'
   source_pages: number; text_extraction_status: 'not_applicable' | 'available' | 'partial' | 'unavailable'
   quality_warnings: number; pages_needing_review: number; critical_facts_needing_review: number; reconciliation_conflicts: string[]

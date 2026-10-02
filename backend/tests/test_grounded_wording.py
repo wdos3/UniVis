@@ -2,32 +2,14 @@ import asyncio
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from app.models import Action, DocumentRequirement, LabeledFact, NoticeData, ReviewState
 from app.services.coverage_repair import RepairDetail, RepairResponse, repair_coverage
 from app.services.grounded_wording import correct_grounded_wording
 from app.services.semantic import OpenAISemanticProvider, normalize_notice
 from app.services.text import simplified_text
 
-
-def test_installment_support_is_not_given_an_unsupported_scholarship_type() -> None:
-    source = "지원금은 2차에 걸쳐 지급하며 결과보고서를 제출한 학생에 한하여 2차 지원금 지급"
-    incorrect = "Scholarships will be paid in two installments, and the second installment requires a final report."
-    expected = (
-        "Support funds are paid in two installments; only students who submit a final report "
-        "receive the second installment."
-    )
-    notice = NoticeData(financial_support=[LabeledFact(text=incorrect, source_evidence=source)])
-
-    normalized = normalize_notice(notice)
-
-    assert normalized.financial_support[0].text == expected
-    assert normalized.financial_support[0].source_evidence == source
-    assert normalized.financial_support[0].state == ReviewState.NEEDS_REVIEW
-    assert correct_grounded_wording(expected, source) == expected
-    assert correct_grounded_wording("Payment", source) == "Payment"
-    assert correct_grounded_wording(incorrect, source.replace("지원금", "장학금")) == incorrect
-    assert correct_grounded_wording(incorrect, source.replace("2차", "3차")) == incorrect
-    assert correct_grounded_wording(incorrect, source + " (휴학생 제외)") == incorrect
 
 
 def test_fundamental_ai_technology_keeps_the_cited_research_topic() -> None:
@@ -43,111 +25,12 @@ def test_fundamental_ai_technology_keeps_the_cited_research_topic() -> None:
     assert correct_grounded_wording(english, "AI 응용 기술 연구 개발") == english
 
 
-def test_recognized_course_eligibility_keeps_the_research_supervision_qualification() -> None:
-    source = "모집 대상: 융합교육원에서 인정하는 연구 관련 과목을 수강하며 연구지도를 받는 학부생"
-    incomplete = "Undergraduate students taking research-related courses recognized by the Convergence Education Center."
-    expected = (
-        "Undergraduate students taking research-related courses recognized by the Convergence Education Center "
-        "and receiving research supervision."
-    )
-
-    assert correct_grounded_wording(incomplete, source) == expected
-    assert correct_grounded_wording(expected, source) == expected
-    assert correct_grounded_wording("Eligibility", source) == "Eligibility"
-    assert correct_grounded_wording(incomplete, source.replace("연구지도를 받는", "연구지도를 신청하는")) == incomplete
-    assert correct_grounded_wording(incomplete, source + " 중 학점 제한 있음") == incomplete
 
 
-def test_leave_participation_retains_both_distinct_funding_exclusions() -> None:
-    source = "휴학생도 참여는 가능하나 연구비 및 활동비 지원 대상에서는 제외"
-    broad = "Leave students can participate but are excluded from funding support."
-    expected = "Students on leave may participate, but are excluded from both research funding and activity allowance support."
-
-    assert correct_grounded_wording(broad, source) == expected
-    assert correct_grounded_wording(expected, source) == expected
-    assert correct_grounded_wording("Eligibility", source) == "Eligibility"
-    assert correct_grounded_wording(broad, source.replace("및 활동비 ", "")) != expected
-    assert correct_grounded_wording(broad, "휴학생 참여 불가") == "Students on leave can participate but are excluded from funding support."
 
 
-def test_enrolled_status_is_restored_only_for_the_complete_cited_eligibility_clause() -> None:
-    english = "Undergraduate students in the second semester of the 2026 academic year."
-    source = "모집 대상: 2026학년도 2학기 학부 재학생"
-    expected = "Undergraduate students enrolled in the second semester of the 2026 academic year."
-
-    assert correct_grounded_wording(english, source) == expected
-    assert correct_grounded_wording(expected, source) == expected
-    assert correct_grounded_wording("Eligibility", source) == "Eligibility"
-    assert correct_grounded_wording(english, source.replace("재학생", "신입생")) == english
-    assert correct_grounded_wording(english, source + " 중 연구 경험자") == english
-    assert correct_grounded_wording(english, "2027학년도 1학기 학부 재학생") == (
-        "Undergraduate students enrolled in the first semester of the 2027 academic year."
-    )
 
 
-def test_spending_verbs_keep_their_source_scope_and_card_payment_covers_all_expenses() -> None:
-    source = "연구비는 기자재 구입 및 대여, 재료비, 도서 구입 및 인쇄비로 사용 가능"
-    english = "Research expenses can be used to purchase and rent equipment, materials, books, and printing costs."
-    expected = "Research expenses may cover equipment purchase or rental, material costs, book purchases, and printing costs."
-
-    assert correct_grounded_wording(english, source) == expected
-    assert correct_grounded_wording(expected, source) == expected
-    assert correct_grounded_wording(
-        "Research expenses can cover equipment, materials, and printing costs.", source,
-    ) == expected
-    assert correct_grounded_wording("Spending", source) == "Spending"
-    assert correct_grounded_wording(english, source.replace("대여, ", "")) == english
-    assert correct_grounded_wording(english, source + ", 식비 제외") == english
-
-
-def test_research_card_rule_does_not_sound_optional_or_describe_grant_disbursement() -> None:
-    source = "연구비는 융합교육원에 방문하여 카드결제"
-    incorrect = "Research funds can be paid by card payment after visiting the Convergence Education Center."
-
-    assert correct_grounded_wording(incorrect, source) == (
-        "Research expenses must be paid by card at the Convergence Education Center, requiring an in-person visit."
-    )
-    assert correct_grounded_wording(incorrect, "연구비 최대 20만원 지급") == incorrect
-    assert correct_grounded_wording(incorrect, "연구비 납부: 융합교육원 방문하여 카드결제") == incorrect
-
-
-def test_observed_funding_processed_wording_becomes_the_exact_source_payment_procedure() -> None:
-    source = "연구비는 융합교육원에 방문하여 카드결제"
-    incorrect = "Research funding must be processed in person at the Convergence Education Center with card payment."
-
-    assert correct_grounded_wording(incorrect, source) == (
-        "Research expenses must be paid by card at the Convergence Education Center, requiring an in-person visit."
-    )
-    assert correct_grounded_wording(incorrect, "연구비는 현장 카드결제로 지급") == incorrect
-    notice = NoticeData(financial_support=[LabeledFact(text=incorrect, source_evidence=source)])
-    assert normalize_notice(notice).financial_support[0].text.startswith("Research expenses must be paid by card")
-
-
-def test_same_or_similar_on_campus_scope_is_recovered_only_from_exact_source_condition() -> None:
-    source = "교내 타 프로그램에서 동일하거나 유사한 연구 주제로 지원을 받는 학생 및 팀은 참여 제한"
-    english = "Students and teams supported for similar research topics in other programs are restricted from participation."
-    expected = "Students and teams receiving support from other on-campus programs for the same or similar research topics are restricted from participation."
-
-    assert correct_grounded_wording(english, source) == expected
-    assert correct_grounded_wording(english.replace("other programs", "other university programs"), source) == expected
-    assert correct_grounded_wording(expected, source) == expected
-    assert correct_grounded_wording(english, source.replace("교내", "교외")) == english
-    assert correct_grounded_wording(english, "교내 타 프로그램에 참여") == english
-
-
-def test_complete_duplicate_support_clause_recovers_receiving_support_without_rewriting_labels() -> None:
-    source = "교내 타 프로그램에서 동일하거나 유사한 연구 주제로 지원을 받는 학생 및 팀은 참여 제한"
-    wrong = "Students and teams applying for similar research topics in other programs are restricted from participation."
-    expected = "Students and teams receiving support from other on-campus programs for the same or similar research topics are restricted from participation."
-    notice = NoticeData(warnings=[LabeledFact(text=wrong, label="Restriction", source_evidence=source)])
-
-    normalized = normalize_notice(notice)
-
-    assert normalized.warnings[0].text == expected
-    assert normalized.warnings[0].label == "Restriction"
-    assert correct_grounded_wording(wrong, source.replace("지원을 받는", "지원을 신청하는")) != expected
-    assert correct_grounded_wording(wrong, source + "\n다른 안내") != expected
-    assert correct_grounded_wording(expected, source) == expected
 
 
 def test_comparison_and_integrated_system_name_requires_cited_korean_name() -> None:
@@ -182,14 +65,14 @@ def test_primary_output_corrects_mistranslations_only_with_cited_korean_evidence
     normalized = normalize_notice(notice)
 
     assert normalized.audience[0].text == (
-        "Students on leave may participate, but are excluded from both research funding and activity allowance support."
+        "Students on leave may participate."
     )
     assert normalized.actions[0].action == (
         "Submit through the Extracurricular Integrated Management System (S Plus)."
     )
     assert normalized.financial_support[0].text == "Research funding: up to KRW 200,000 per person."
     assert normalized.financial_support[1].text == (
-        "Research expenses must be paid by card at the Convergence Education Center, requiring an in-person visit."
+        "Research expenses must be paid at the Convergence Education Center by card."
     )
     for item, evidence in (
         (normalized.audience[0], leave_evidence),
@@ -219,7 +102,7 @@ def test_activity_allowance_is_not_called_a_fee_when_awarded() -> None:
     )
 
 
-def test_unstated_acronym_expansion_is_removed_from_cited_detail() -> None:
+def test_local_glossary_does_not_replace_acronyms_or_their_expansions() -> None:
     evidence = "AI Wearable Device의 AIX 발굴과 MVP(Minimum Value Prototyping)"
     notice = NoticeData(
         key_details=[LabeledFact(
@@ -231,8 +114,7 @@ def test_unstated_acronym_expansion_is_removed_from_cited_detail() -> None:
 
     normalized = normalize_notice(notice, source_text=evidence + "\n연구비 및 활동비 지원")
 
-    assert normalized.key_details[0].text == "Discover AIX for AI Wearable Devices."
-    assert normalized.key_details[0].state == ReviewState.NEEDS_REVIEW
+    assert normalized.key_details[0].text == "Discover AIX (AI Experience) for AI Wearable Devices."
     assert normalized.summary == "Research funding and activity allowances support this project."
     assert correct_grounded_wording("AIX (AI Experience)", "AIX (AI Experience) 연구") == (
         "AIX (AI Experience)"
@@ -304,7 +186,7 @@ def test_observed_are_paid_card_wording_is_recast_as_a_purchase_procedure() -> N
     evidence = "연구비 사용: 융합교육원에 방문하여 카드결제"
 
     assert correct_grounded_wording(observed, evidence) == (
-        "Research expenses must be paid by card at the Convergence Education Center, requiring an in-person visit."
+        "Research expenses are paid by visiting the Convergence Education Center and using card payment."
     )
 
 
@@ -371,6 +253,38 @@ def test_post_audit_details_receive_the_same_evidence_gated_corrections() -> Non
     ]
     assert [item.text for item in result.notice.financial_support] == [
         "Research funding: up to KRW 200,000 per person.",
-        "Research expenses must be paid by card at the Convergence Education Center, requiring an in-person visit.",
+        "Research expenses must be paid at the Convergence Education Center by card during an in-person visit.",
     ]
     assert [item.source_evidence for item in result.notice.key_details + result.notice.financial_support] == lines
+
+
+@pytest.mark.parametrize(("source", "english"), [
+    ("지원금은 2차에 걸쳐 지급하며 결과보고서를 제출한 학생에 한하여 2차 지원금 지급",
+     "Support is paid in two installments."),
+    ("모집 대상: 융합교육원에서 인정하는 연구 관련 과목을 수강하며 연구지도를 받는 학부생",
+     "Undergraduates taking recognized research courses."),
+    ("모집 대상: 2027학년도 1학기 학부 재학생",
+     "Undergraduates in the first semester of 2027."),
+    ("연구비는 기자재 구입 및 대여, 재료비, 도서 구입 및 인쇄비로 사용 가능",
+     "Research expenses cover equipment and printing."),
+    ("교내 타 프로그램에서 동일하거나 유사한 연구 주제로 지원을 받는 학생 및 팀은 참여 제한",
+     "Applicants from other programs cannot participate."),
+    ("연구비는 융합교육원에 방문하여 카드결제",
+     "Research funding is processed in person at the Convergence Education Center."),
+    ("연구비는 산학협력단에 방문하여 카드결제",
+     "Research funding is processed in person at the Industry Cooperation Office."),
+    ("휴학생도 참여는 가능하나 연구비 및 활동비 지원 대상에서는 제외",
+     "Students on leave may participate."),
+    ("지원금은 3차에 걸쳐 지급하며 수료한 학생에 한하여 마지막 지원금 지급",
+     "Support is paid in three installments."),
+])
+def test_local_wording_does_not_compose_missing_conditions_or_replace_notice_sentences(source, english) -> None:
+    # Incomplete clauses must pass through the independent audit and its retry.
+    assert correct_grounded_wording(english, source) == english
+
+
+@pytest.mark.parametrize("institution", ["Housing Office", "Graduate School", "Regional Research Center"])
+def test_glossary_keeps_new_institutions_amounts_and_conditions(institution) -> None:
+    english = f"Research fees must be paid by card at the {institution} after approval; maximum KRW 450,000."
+    source = "연구비는 승인 후 해당 기관에서 카드결제; 최대 45만원"
+    assert correct_grounded_wording(english, source) == english.replace("Research fees", "Research expenses")

@@ -101,7 +101,8 @@ def test_client_ocr_sends_column_order_to_translation(monkeypatch: MonkeyPatch) 
     page = _poster_page()
     observed: dict[str, str] = {}
 
-    async def capture(request, *, layout_context):
+    async def capture(request, *, layout_context, allow_partial):
+        assert allow_partial is False
         observed["text"] = request.text
         observed["layout"] = layout_context
         raise RuntimeError("captured")

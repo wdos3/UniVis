@@ -89,12 +89,132 @@ describe('App browser OCR', () => {
 
     await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenCalledWith([{ text: '공지사항 신청 방법', spans: [] }], 1200, 'auto', 'uploaded_image'))
     expect(recognizeImages).toHaveBeenCalledWith([file], expect.any(Function))
+    expect(await screen.findByRole('tab', { name: /Simplified Text/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('Notice')
+    fireEvent.click(screen.getByRole('tab', { name: /Original Korean/ }))
     expect(screen.getByAltText('Original notice page 1')).toHaveAttribute('src', 'blob:result')
     expect(screen.getByRole('textbox', { name: '' })).toHaveValue('공지사항 신청 방법')
     expect(createUrl).toHaveBeenCalledWith(file)
     unmount()
     expect(revokeUrl).toHaveBeenCalledWith('blob:draft')
     expect(revokeUrl).toHaveBeenCalledWith('blob:result')
+  })
+
+  it('analyzes a replacement notice independently of the previously selected image', async () => {
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: false, default_provider: 'mock', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })
+    vi.mocked(recognizeImages)
+      .mockResolvedValueOnce({ pages: [{ text: '첫 공지', spans: [] }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700, ...ocrMetrics })
+      .mockResolvedValueOnce({ pages: [{ text: '다른 공지', spans: [] }], latencyMs: 700, initializationMs: 0, inferenceMs: 700, ...ocrMetrics, modelState: 'reused' })
+    vi.mocked(api.analyzeClientOcr)
+      .mockResolvedValueOnce(imageResult)
+      .mockResolvedValueOnce({ ...imageResult, id: 'another-result', original_text: '다른 공지', recovered_text: '다른 공지' })
+    const createUrl = vi.fn().mockReturnValueOnce('blob:draft-first').mockReturnValueOnce('blob:result-first')
+      .mockReturnValueOnce('blob:draft-second').mockReturnValueOnce('blob:result-second')
+    const revokeUrl = vi.fn()
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createUrl })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeUrl })
+    const { container } = render(<App />)
+    await screen.findByText('Photos are read on your device.')
+    const first = new File(['first image'], 'first.png', { type: 'image/png' })
+    const second = new File(['second image'], 'second.png', { type: 'image/png' })
+    const input = container.querySelector('input[multiple]')!
+    fireEvent.change(input, { target: { files: [first] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+    fireEvent.click(await screen.findByRole('tab', { name: /Original Korean/ }))
+    await screen.findByAltText('Original notice page 1')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Upload another notice' }))
+    fireEvent.change(input, { target: { files: [second] } })
+    expect(screen.queryByAltText('Original notice page 1')).not.toBeInTheDocument()
+    expect(screen.queryByText('first.png')).not.toBeInTheDocument()
+    expect(revokeUrl).toHaveBeenCalledWith('blob:draft-first')
+    expect(revokeUrl).toHaveBeenCalledWith('blob:result-first')
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+
+    await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenLastCalledWith([{ text: '다른 공지', spans: [] }], 700, 'auto', 'uploaded_image'))
+    expect(recognizeImages).toHaveBeenLastCalledWith([second], expect.any(Function))
+    fireEvent.click(await screen.findByRole('tab', { name: /Original Korean/ }))
+    expect(screen.getByAltText('Original notice page 1')).toHaveAttribute('src', 'blob:result-second')
+  })
+
+  it('shows supported English and explicit verification gaps without requiring Korean edits', async () => {
+    const supportedFact = 'Apply by October 5, 2026.'
+    const partialResult: AnalysisResult = {
+      ...imageResult,
+      provider: 'openai',
+      simplified_text: `${supportedFact}\n\nVerification gaps\nTwo source lines could not be verified. Upload a clearer photo of those sections.`,
+      acquisition: { ...imageResult.acquisition, english_coverage_status: 'partial', unverified_source_units: 2 },
+    }
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: true, default_provider: 'openai', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })
+    vi.mocked(recognizeImages).mockResolvedValue({ pages: [{ text: '신청 마감\n잘 읽히지 않는 글자', spans: [] }], latencyMs: 1200, initializationMs: 500, inferenceMs: 700, ...ocrMetrics })
+    vi.mocked(api.analyzeClientOcr).mockResolvedValue(partialResult)
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn().mockReturnValue('blob:partial-photo') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+    const { container } = render(<App />)
+    await screen.findByText('Photos are read on your device.')
+    fireEvent.change(container.querySelector('input[multiple]')!, { target: { files: [new File(['private photo'], 'notice.png', { type: 'image/png' })] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+
+    expect(await screen.findByText(/Partial interpretation/)).toBeInTheDocument()
+    expect(screen.getByText('Some details could not be verified.')).toBeInTheDocument()
+    expect(screen.getByText(/2 source line\(s\) remain unverified/)).toHaveTextContent('You do not need to type Korean.')
+    expect(screen.getByRole('tab', { name: /Simplified Text/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tabpanel')).toHaveTextContent(supportedFact)
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('Verification gaps')
+    expect(screen.getByRole('tabpanel').textContent).not.toMatch(/[가-힣]/)
+    expect(screen.queryByText('Retry without Korean transcription')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: /Page 1 recognized text/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry analysis' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry English interpretation' })).toBeEnabled()
+  })
+
+  it.each([
+    { name: 'partially interpreted text', pages: [{ text: '신청 마감\n문의 02-123-45n7', spans: [{
+      text: '문의 02-123-45n7', confidence: 0.6, box: { x: 0.1, y: 0.8, width: 0.6, height: 0.05 },
+    }] }] },
+    { name: 'empty OCR', pages: [{ text: '', spans: [] }] },
+  ])('retries $name without reading the photo again or requiring Korean edits', async ({ pages }) => {
+    const partialResult: AnalysisResult = {
+      ...imageResult,
+      provider: 'openai',
+      notice: { ...notice, title: 'English interpretation needs verification' },
+      simplified_text: 'Some details could not be verified. Retry the English interpretation or upload a clearer photo.',
+      acquisition: { ...imageResult.acquisition, english_coverage_status: 'partial', unverified_source_units: 1 },
+    }
+    vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: true, default_provider: 'openai', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })
+    vi.mocked(recognizeImages).mockResolvedValue({ pages, latencyMs: 1200, initializationMs: 500, inferenceMs: 700, ...ocrMetrics })
+    vi.mocked(api.analyzeClientOcr).mockResolvedValue(partialResult)
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn()
+      .mockReturnValueOnce('blob:draft').mockReturnValueOnce('blob:first-result')
+      .mockReturnValueOnce('blob:retry-result').mockReturnValueOnce('blob:new-notice') })
+    const revokeUrl = vi.fn()
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeUrl })
+    const { container } = render(<App />)
+    await screen.findByText('Photos are read on your device.')
+    const input = container.querySelector('input[multiple]')!
+    const file = new File(['private photo bytes'], 'notice.png', { type: 'image/png' })
+    fireEvent.change(input, { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry English interpretation' }))
+
+    await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenCalledTimes(2))
+    const calls = vi.mocked(api.analyzeClientOcr).mock.calls
+    expect(calls[0]).toEqual([pages, 1200, 'auto', 'uploaded_image'])
+    expect(calls[1]).toEqual(calls[0])
+    expect(recognizeImages).toHaveBeenCalledOnce()
+    expect(recognizeImages).toHaveBeenCalledWith([file], expect.any(Function))
+    expect(screen.queryByRole('textbox', { name: /Page 1 recognized text/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry analysis' })).not.toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('tab', { name: /Original Korean/ }))
+    await waitFor(() => expect(screen.getByAltText('Original notice page 1')).toHaveAttribute('src', 'blob:retry-result'))
+    expect(revokeUrl).toHaveBeenCalledWith('blob:first-result')
+    expect(revokeUrl).not.toHaveBeenCalledWith('blob:draft')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Upload another notice' }))
+    fireEvent.change(input, { target: { files: [new File(['new private photo'], 'new-notice.png', { type: 'image/png' })] } })
+    expect(screen.queryByRole('button', { name: 'Retry English interpretation' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'English interpretation needs verification' })).not.toBeInTheDocument()
+    expect(revokeUrl).toHaveBeenCalledWith('blob:draft')
   })
 
   it('does not attach photo A to saved notice B when a researcher switches results', async () => {
@@ -118,6 +238,7 @@ describe('App browser OCR', () => {
     await screen.findByText('Photos are read on your device.')
     fireEvent.change(container.querySelector('input[multiple]')!, { target: { files: [new File(['A'], 'photo-A.png', { type: 'image/png' })] } })
     fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
+    fireEvent.click(await screen.findByRole('tab', { name: /Original Korean/ }))
     expect(await screen.findByAltText('Original notice page 1')).toHaveAttribute('src', 'blob:result-A')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit recovered text' }))
@@ -194,20 +315,21 @@ describe('App browser OCR', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
 
     expect(await screen.findByText('Coverage check could not resolve all details.')).toBeInTheDocument()
-    expect(screen.getByText('Review recognized text before retrying')).toBeInTheDocument()
+    expect(screen.getByText('Retry without Korean transcription')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open page photo' })).toHaveAttribute('href', 'blob:draft')
     expect(screen.getByPlaceholderText('공지사항의 한국어 텍스트를 여기에 붙여넣으세요…')).toBeDisabled()
     expect(screen.getByText(/Photo correction is active above/)).toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: /Page 1 recognized text/i }), { target: { value: '지원 마감 9월 30일' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Retry analysis with corrected text' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry analysis' }))
 
     await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenLastCalledWith(
       [{ text: '지원 마감 9월 30일', spans: [{ text: '지원 마감 9월 30일', box: recoveredPage.spans[0].box }] }], 1200, 'auto', 'uploaded_image',
     ))
     expect(recognizeImages).toHaveBeenCalledTimes(1)
+    fireEvent.click(await screen.findByRole('tab', { name: /Original Korean/ }))
     expect(await screen.findByAltText('Original notice page 1')).toHaveAttribute('src', 'blob:result')
     expect(createUrl).toHaveBeenCalledWith(file)
-    expect(screen.queryByText('Review recognized text before retrying')).not.toBeInTheDocument()
+    expect(screen.queryByText('Retry without Korean transcription')).not.toBeInTheDocument()
     expect(screen.getByPlaceholderText('공지사항의 한국어 텍스트를 여기에 붙여넣으세요…')).toBeEnabled()
   })
 
@@ -225,7 +347,7 @@ describe('App browser OCR', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
     expect(await screen.findByText('Retype the telephone number from the footer.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Generate instructions' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Retry analysis with corrected text' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Retry analysis' })).toBeEnabled()
     expect(screen.queryByRole('heading', { name: 'Test notice' })).not.toBeInTheDocument()
   })
 
@@ -253,13 +375,13 @@ describe('App browser OCR', () => {
     const documentInput = container.querySelector('input[accept=".pdf,.txt"]')!
     fireEvent.change(documentInput, { target: { files: [document] } })
     expect(await screen.findByText('Document upload failed.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Retry analysis with corrected text' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Retry analysis' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Generate instructions' })).toBeDisabled()
 
     fireEvent.change(documentInput, { target: { files: [document] } })
     await screen.findByRole('heading', { level: 2, name: 'Document notice' })
     expect(screen.queryByText('Retype the telephone number from the photo.')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Retry analysis with corrected text' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry analysis' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Generate instructions' })).toBeEnabled()
     expect(screen.getByPlaceholderText('공지사항의 한국어 텍스트를 여기에 붙여넣으세요…')).toHaveValue('새 문서 공지사항')
     expect(screen.getByPlaceholderText('공지사항의 한국어 텍스트를 여기에 붙여넣으세요…')).toBeEnabled()
@@ -289,7 +411,7 @@ describe('App browser OCR', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Analyze notice photo' }))
     expect(await screen.findByText('Review OCR lines.')).toBeInTheDocument()
     fireEvent.change(screen.getByRole('textbox', { name: /Page 1 recognized text/i }), { target: { value: corrected } })
-    fireEvent.click(screen.getByRole('button', { name: 'Retry analysis with corrected text' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Retry analysis' }))
 
     await waitFor(() => expect(api.analyzeClientOcr).toHaveBeenLastCalledWith(
       [{ text: corrected, spans: keepPositions ? [
@@ -319,7 +441,7 @@ describe('App browser OCR', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Analyze 2 pages as one notice' })).toBeEnabled())
     expect(screen.queryByRole('heading', { level: 2, name: 'Test notice' })).not.toBeInTheDocument()
     expect(screen.queryByAltText('Original notice page 1')).not.toBeInTheDocument()
-    expect(screen.queryByText('Review recognized text before retrying')).not.toBeInTheDocument()
+    expect(screen.queryByText('Retry without Korean transcription')).not.toBeInTheDocument()
     expect(screen.getByText('second.png')).toBeInTheDocument()
   })
 

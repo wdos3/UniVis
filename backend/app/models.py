@@ -154,7 +154,11 @@ class ImageAcquisitionReport(BaseModel):
     extraction_latency_ms: int = Field(default=0, ge=0)
     english_repair_latency_ms: int = Field(default=0, ge=0)
     coverage_latency_ms: int = Field(default=0, ge=0)
+    english_verification_latency_ms: int = Field(default=0, ge=0)
     total_latency_ms: int = Field(default=0, ge=0)
+    english_coverage_status: Literal["not_audited", "audited", "partial"] = "not_audited"
+    unverified_source_units: int = Field(default=0, ge=0)
+    metrics_complete: bool = True
 
 
 class TemplateOverrides(BaseModel):
@@ -274,6 +278,7 @@ class ClientOcrRequest(BaseModel):
     provider: Literal["auto", "mock", "openai"] = "auto"
     input_type: Literal["camera_photo", "uploaded_image"] = "uploaded_image"
     ocr_latency_ms: int = Field(ge=0, le=3_600_000)
+    allow_partial: bool = False
 
     @model_validator(mode="after")
     def limit_recognized_text(self) -> ClientOcrRequest:

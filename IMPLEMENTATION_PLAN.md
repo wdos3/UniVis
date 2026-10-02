@@ -1,4 +1,4 @@
-# Version 2 recovery and latency work
+# Version 2 general notice recovery and latency work
 
 ## Scope and constraints
 
@@ -23,3 +23,20 @@ Continue `prototype/paddleocr-gpt41mini`; preserve Version 1 and keep Version 2 
 - Run backend tests/lint, frontend tests/lint/type/build checks; inspect the diff and remove unused code.
 - Exercise available original photo input and corrected retries in the browser, compare against explicit Sogang and KCCI requirements, and record remaining uncertainty.
 - Commit/push only this experimental branch; deploy validated changes to the linked Vercel project, verify the alias/assets/API and photo/correction flow, and document measured results and limitations.
+
+## Generalization follow-through
+
+The user requires one pipeline for varied Korean images, not a bespoke Sogang
+translator. Remove complete-sentence canonical rewrites and keep only source-backed
+glossary corrections. Preserve gpt-4o-mini and the independent audit with one bounded
+retry for malformed provider classifications. Test counterfactual source values,
+unseen notice categories, Korean contact particles, and rating/table layouts.
+
+Use all five actual photos in the supplied Korean Images folder as independent
+notices; record first-pass outcomes, correction/retry costs, and source comparisons.
+Synthetic injected-audit tests establish contracts, not empirical OCR/model accuracy.
+Retain uncertain readings and return English gaps or an unavailable state rather
+than guessing or requiring Korean transcription. Retry from retained OCR is
+optional and must not rerun OCR or restore a replaced image's stale results.
+Review the complete diff, run checks, validate locally, deploy only the experimental
+branch to its existing Vercel alias, and repeat hosted usability/photo checks.
