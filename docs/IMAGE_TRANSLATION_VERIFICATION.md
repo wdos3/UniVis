@@ -79,6 +79,45 @@ TOEIC Speaking 150 and OPIc IM3, each inclusive. MyMemory had originally returne
 and preserves the other exact values. This table check does not validate the
 English meaning of unrelated hiring requirements.
 
+## Deployment checks
+
+Code commit `d1f6ff2` was pushed only to `prototype/paddleocr-gpt41mini` and
+deployed to the existing `univis-v2-prototype` project. Vercel deployment
+`dpl_4JCCU4XU4KdSAuMsKHWJxjAWadFt` reached READY and was aliased to
+`https://univis-v2-prototype.vercel.app/`. The deployment retained the static Vite
+frontend and Python 3.12 API packaging.
+
+Live HTTP checks confirmed: root HTML and the current entry bundle returned 200;
+health returned 200 with public mode enabled and the existing `gpt-4o-mini`
+semantic model; OCR worker, WASM, QR and preserved legacy entry assets returned
+200 with their expected JavaScript/WASM/CSS content types. The protected notices
+route still returned 403. The new endpoint returned exact local `800 or more`
+and `IM3 or more` results with zero outbound translation requests, and rejected
+an extra image field with 422. No credentials were returned or printed.
+
+Both main original photographs completed the actual hosted file chooser →
+browser OCR → text-only API → canvas → download flow on this deployment:
+
+| Original photo | OCR | Translation | Drawing | Total | English placements | Latin/numeric originals | Other originals |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Sogang creative research `_02` | 35.2 s | 6.6 s | 1.0 s | 42.8 s | 31 / 62 | 12 | 19 |
+| KCCI hiring `_06` | 54.5 s | 8.7 s | 1.1 s | 64.3 s | 60 / 98 | 21 | 17 |
+
+These used fresh photo selections, without cached OCR results; the second
+photo reused an initialized OCR engine. The Sogang source had 65 positioned
+spans and made 50 known translator requests. KCCI had 114 spans and 67 known
+translator requests. All six exact inclusive score thresholds were checked in
+the hosted region list and exported picture. Its 17 retained Korean regions
+comprised 14 overlap conflicts and three unreadable fits. Sogang's 19 were all
+overlap conflicts. No provider failures occurred in these two runs. This does
+not establish correctness of the translated prose.
+
+Original/translated toggling, PNG download, region inspection, returning to the
+existing notice workspace, and reentering the new mode were exercised in the
+hosted UI. Exported sample images and browser screenshots are saved locally in
+`C:\Users\Lam\Desktop\Coding\UniVis Image Translation Results`; source photos
+and these generated images were not committed or uploaded to the API.
+
 ## Practical limits
 
 Replacement counts cover selected OCR regions, including seal text, repeated
