@@ -14,6 +14,10 @@ instruction choices are evaluated.
   frontend; Vercel packages the Python function's pinned runtime separately.
 - `api/index.py` exposes the existing FastAPI application as a Vercel Python
   function.
+- The separate `#image-translate` mode posts IDs/text to
+  `/api/translate-image-text` and draws/downloads its translated PNG in the
+  browser. It uses the same free translation configuration and requires no
+  OpenAI key or OCR container. No photo bytes go to that route.
 - The hosted camera and image upload path runs PaddleOCR.js with Korean/English
   PP-OCRv5 models in the visitor's browser. It posts per-page recognized
   text and normalized text-box positions to `/api/analyze-client-ocr`; photo

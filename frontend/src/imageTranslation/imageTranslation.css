@@ -1,0 +1,18 @@
+.overlay-workspace { padding-block: 36px 64px; }
+.overlay-workspace h1 { margin-bottom: 12px; font-size: clamp(1.7rem, 4vw, 2.5rem); }
+.overlay-workspace > p { max-width: 800px; line-height: 1.65; }
+.overlay-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-block: 24px; }
+.overlay-report { padding: 18px 22px; border: 1px solid var(--line); border-radius: 10px; background: white; margin-bottom: 24px; }
+.overlay-report p { margin-block: 8px; line-height: 1.5; }
+.overlay-report small { color: var(--muted); }
+.overlay-preview { margin: 0; padding: 12px; background: #dbe2df; border-radius: 10px; }
+.overlay-preview img { display: block; width: 100%; height: auto; max-width: 1050px; margin: auto; }
+.overlay-preview figcaption { padding: 12px 4px 0; color: #394a45; overflow-wrap: anywhere; }
+.overlay-error { border-left: 4px solid #b43b29; background: #fff1ea; padding: 14px 18px; }
+.overlay-regions { margin-top: 24px; background: white; border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.overlay-regions summary { font-weight: 700; cursor: pointer; }
+.overlay-regions ol { padding-left: 28px; }
+.overlay-regions li { padding-block: 14px; border-bottom: 1px solid var(--line); }
+.overlay-regions li div { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 8px; }
+.overlay-region-status { font-size: .8rem; color: var(--muted); }
+@media (max-width: 600px) { .image-translator .site-header { flex-wrap: wrap; gap: 12px; } .overlay-report { padding: 14px; } .overlay-preview { padding: 4px; } }

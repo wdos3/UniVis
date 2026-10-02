@@ -1,5 +1,21 @@
 import type { AnalysisResult, ClientOcrPage, DemoSummary, ImageDemoSummary, NoticeData } from '../types'
 
+export interface ImageTextTranslation {
+  id: string
+  source_text: string
+  translated_text: string
+  status: 'translated' | 'unchanged' | 'failed'
+  error?: string | null
+}
+
+export interface ImageTextTranslationResult {
+  regions: ImageTextTranslation[]
+  provider: string
+  request_count: number
+  latency_ms: number
+  metrics_complete: boolean
+}
+
 export interface SourceCorrection {
   page: number | null
   line: number | null
@@ -57,6 +73,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  translateImageText: (regions: { id: string; text: string }[], signal?: AbortSignal) => request<ImageTextTranslationResult>('/api/translate-image-text', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ regions, target_language: 'en' }), signal,
+  }),
   health: () => request<{ status: string; openai_configured: boolean; default_provider: string; ocr_provider: string; public_mode: boolean }>('/api/health'),
   demos: () => request<DemoSummary[]>('/api/demos'),
   imageDemos: () => request<ImageDemoSummary[]>('/api/image-demos'),

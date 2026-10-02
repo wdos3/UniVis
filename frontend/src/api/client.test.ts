@@ -4,6 +4,15 @@ import { api, ApiError } from './client'
 describe('client-side OCR analysis request', () => {
   afterEach(() => vi.unstubAllGlobals())
 
+  it('sends image translation as bounded text regions with cancellation and no image bytes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ regions: [] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+    await api.translateImageText([{ id: 'R001', text: '신청 기간' }], controller.signal)
+    expect(fetchMock).toHaveBeenCalledWith('/api/translate-image-text', expect.objectContaining({ method: 'POST', signal: controller.signal }))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ regions: [{ id: 'R001', text: '신청 기간' }], target_language: 'en' })
+  })
+
   it('posts ordered OCR text as JSON without files or image bytes', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'notice-1' }), {
       status: 200,

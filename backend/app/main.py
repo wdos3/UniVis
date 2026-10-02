@@ -41,6 +41,7 @@ from app.services.extraction.language_scores import (
     validate_aligned_language_scores, EXAM_NAME, EXAM_SUFFIX, EXAM_MENTION,
 )
 from app.services.image_demos import IMAGE_DEMOS
+from app.services.image_translation import router as image_translation_router
 from app.services.images.pdf_images import render_pdf_pages
 from app.services.images.preprocessing import ImageProcessingError, prepare_image, upload_root
 from app.services.ocr_layout import format_ocr_layout, reorder_ocr_page_columns
@@ -85,6 +86,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT"],
     allow_headers=["*"],
 )
+app.include_router(image_translation_router)
 DEMO_IMAGE_ROOT = Path(__file__).resolve().parents[2] / "demo_data" / "images"
 app.mount("/uploads", StaticFiles(directory=upload_root()), name="uploads")
 app.mount("/demo-images", StaticFiles(directory=DEMO_IMAGE_ROOT, check_dir=False), name="demo-images")

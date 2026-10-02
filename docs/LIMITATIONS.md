@@ -1,5 +1,27 @@
 # Limitations
 
+## Text-in-image translation prototype
+
+The independent image translator bypasses semantic analysis and source auditing.
+MyMemory can produce awkward or wrong English, especially from broken OCR lines,
+proper names and administrative terms. Tiny seal text can become meaningless
+English. Exact Latin text/numbers/URLs are retained as detected; this does not
+correct OCR-confused digits or letters. A partially translated region is never
+painted over its source if Korean remains in the translation response.
+
+Placement uses axis-aligned OCR boxes and flat locally sampled background colors,
+not perspective correction or image inpainting. It can leave source glyph edges,
+produce visible patches, shrink longer English and retain severe overlaps or
+text that cannot fit. Parallel table cells stay separate, which preserves their
+positions but limits sentence context across columns. Photos not successfully
+detected by OCR cannot be completely translated. Per-region inspection shows
+all selected region texts, including retained originals, and replacement counts
+measure drawing only. The prototype supports one JPG/PNG/WebP under 15 MB and
+25 megapixels, up to 200 regions and 20,000 recognized characters per request.
+Provider quotas, network failures and browser capabilities remain external
+limits. It is not a guarantee that every image or every detected sentence will
+translate successfully. See [measured results](IMAGE_TRANSLATION_VERIFICATION.md).
+
 ## Model and translation error
 
 OCR can corrupt Korean text, a free translator can mistranslate administrative language, and the semantic model can still omit or misclassify facts even when constrained by a schema. Version 2 now uses an initial structured extraction, optional batched English-field repair calls, and a separate completeness audit that may make a targeted retry. These checks consume additional OpenAI tokens and time. A [schema-conforming response can still contain mistakes](https://developers.openai.com/api/docs/guides/structured-outputs); human bilingual review remains necessary.

@@ -86,6 +86,32 @@ Template selection is deterministic:
 
 The same `AnalysisResult` drives the Original, Translation, Simplified, and Visual tabs. Research Mode reveals only one condition. Researcher View allows schema-level manual correction and calls the backend to validate and regenerate derived output without an AI call.
 
+### Independent image translation prototype
+
+`ImageTranslator` is a separate single-photo mode at `#image-translate`. It reuses
+browser PaddleOCR, resolves comparable repeated crop readings and conservatively
+groups continuation lines into positioned regions. Table-like parallel cells stay
+separate. `/api/translate-image-text` accepts only region IDs and recognized text,
+rejects extra fields, bounds region/text counts and applies the public analysis
+rate limit. The existing translation adapter translates unique Korean strings
+with at most four simultaneous outbound connections. Latin-only values remain
+unchanged; expected provider failures are isolated by region. Empty or still-Korean
+responses retain the original text and report an error.
+
+Region IDs and exact source text must match before the browser draws a response.
+The renderer uses the original image's orientation and dimensions, samples local
+background colors, wraps complete English without truncation and paints only
+regions whose text fits. Slight overlap between neighboring aligned lines gets
+separate paint boundaries; retained-original neighbors remain protected. Severe
+or ambiguous overlap stays original. PNG creation and download use local canvas
+and object URLs. Replacing/exiting a photo aborts translation, rejects stale
+results and releases object URLs; repeat runs reuse OCR for that same selection.
+
+This route has no semantic provider, completeness audit, OpenAI requests,
+analysis persistence or image upload. It is a machine-translation/placement
+experiment; replacement counts do not establish accurate translation or OCR
+recall. See [measured verification and limitations](IMAGE_TRANSLATION_VERIFICATION.md).
+
 ### Persistence
 
 SQLite stores complete processed-notice snapshots and research results. For the

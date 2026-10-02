@@ -13,6 +13,17 @@ Targeted photo repairs can quote exact nearby source context to retain
 heading/continuation relationships. Explicit printed acronym expansions can be
 restored from the field's own quotation; no expansion is inferred from memory.
 
+The separate **Image translation** prototype reads text locally, translates
+positioned regions with MyMemory, and draws English back into the original photo.
+Open [the image translator](https://univis-v2-prototype.vercel.app/#image-translate)
+or select **Image translation** in the workspace. It does not call OpenAI or run
+the notice interpretation/audit pipeline. Photos and exported PNGs stay in the
+browser; only recognized text is sent for translation. The result includes
+original/translated comparison, a PNG download, per-region source/English text,
+replacement counts and stage timings. Failed translations and unreadable fits
+retain original pixels. Counts measure placement rather than linguistic accuracy
+or text OCR missed. See [prototype verification](docs/IMAGE_TRANSLATION_VERIFICATION.md).
+
 **Visualizing Korean University Notices for International Students**
 
 VisNotice is a local research prototype that turns a photograph, screenshot, PDF, or Korean text notice into three independently presentable conditions:
@@ -33,6 +44,7 @@ It is designed to test whether visualization helps international students identi
 - conservative column-aware ordering for browser OCR when positioned text clearly forms two side-by-side sections;
 - local best-effort QR URL decoding that never opens links automatically;
 - selectable MyMemory or LibreTranslate adapter plus mock translation for demos;
+- separate text-in-image translation with local canvas rendering and PNG export;
 - translation chunking that keeps OCR paragraph/column boundaries and whole lines where the provider's byte limit permits;
 - strict Pydantic intermediate representation—models never generate React or HTML;
 - English-language field repair and source-line auditing with bounded retries; photo mode withholds uncertain claims and shows supported facts with explicit English verification gaps;

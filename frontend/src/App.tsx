@@ -12,11 +12,12 @@ import { PhotoTimings, type PhotoTimingsData } from './components/PhotoTimings'
 import { isBrowserOcrSupported, recognizeImages, type BrowserOcrMetrics, type BrowserOcrPage } from './ocr/browserOcr'
 import { correctedOcrPage } from './ocr/correctedOcrPage'
 import { AdminView } from './pages/AdminView'
+import { ImageTranslator } from './imageTranslation/ImageTranslator'
 import { ResearchMode } from './research/ResearchMode'
 import type { AnalysisResult, DemoQuestion, DemoSummary, ImageDemoSummary } from './types'
 
 type Tab = 'original' | 'translation' | 'simplified' | 'visual'
-type View = 'workspace' | 'research' | 'admin'
+type View = 'workspace' | 'research' | 'admin' | 'image-translation'
 
 interface OcrDraft {
   imageIds: string[]
@@ -42,7 +43,7 @@ const tabOptions: { id: Tab; label: string; short: string }[] = [
 ]
 
 function App() {
-  const [view, setView] = useState<View>('workspace')
+  const [view, setView] = useState<View>(() => window.location.hash === '#image-translate' ? 'image-translation' : 'workspace')
   const [demos, setDemos] = useState<DemoSummary[]>([])
   const [imageDemos, setImageDemos] = useState<ImageDemoSummary[]>([])
   const [imagePages, setImagePages] = useState<ImageDraft[]>([])
@@ -291,13 +292,14 @@ function App() {
     finally { setBusy(false) }
   }
 
+  if (view === 'image-translation') return <ImageTranslator onExit={() => { window.history.replaceState(null, '', window.location.pathname + window.location.search); setView('workspace') }} />
   if (view === 'research' && result) return <ResearchMode result={result} questions={questions} publicMode={publicMode} onExit={() => setView('workspace')} />
   if (view === 'admin' && !publicMode) return <AdminView current={result} onExit={() => setView('workspace')} onUpdated={updateResult} />
 
   return <div className="app">
     <header className="site-header">
       <a className="brand" href="#top" aria-label="VisNotice Version 2 home"><span className="brand-mark"><PanelTop size={20} /></span><span><strong>VisNotice — Version 2</strong><small>Token-efficient split pipeline</small></span></a>
-      <nav aria-label="Application modes"><button onClick={() => setView('research')} disabled={!result || busy}><FlaskConical size={16} />Research Mode</button>{!publicMode && <button disabled={busy} onClick={() => setView('admin')}><LayoutDashboard size={16} />Researcher View</button>}</nav>
+      <nav aria-label="Application modes"><button disabled={busy} onClick={() => { window.history.replaceState(null, '', '#image-translate'); setView('image-translation') }}><ImageIcon size={16} />Image translation</button><button onClick={() => setView('research')} disabled={!result || busy}><FlaskConical size={16} />Research Mode</button>{!publicMode && <button disabled={busy} onClick={() => setView('admin')}><LayoutDashboard size={16} />Researcher View</button>}</nav>
     </header>
 
     <main id="top">
