@@ -266,6 +266,59 @@ but preferences still appeared as eligibility and selection stages were
 incomplete. Neither replay establishes a controlled latency improvement or
 universal correctness; provider responses varied between attempts.
 
+The follow-through release deployed code commit
+`97c56aba71f874dddf9e980bffd7fd5734b72cd9` as
+`dpl_7iFa4jkz23eDFhjtnS3BufasMqBY` on the existing experimental alias. Vercel
+reported Ready and rebuilt the static frontend and Python 3.12 API. Fresh root,
+health, frontend JS, OCR worker, WASM and QR assets returned HTTP 200; public
+`/api/notices` returned the expected HTTP 403. Root retained `no-store`, health
+reported `gpt-4o-mini` and public mode, and the old banner string was absent from
+the deployed JS. No hosting configuration, credentials or Version 1 code changed.
+
+Fresh hosted original-photo verification after that deployment required no Korean
+editing. The primary returned English in 132.7 s UI wall time (132.3 s pipeline):
+OCR 38.1 s, baseline translation 1.9 s / five requests, semantic 94.1 s / four
+calls / 28,821 tokens. Expanded timing showed model preparation 2.8 s, detection
+19.4 s, recognition 12.2 s, parallel QR 1.4 s, image reading 35.3 s, two additional
+small-text checks, and latest API/network 94.6 s. The browser OCR model was
+initialized; download/cache state does not establish a cold-start benchmark.
+
+The English panel contained no Korean characters or the removed banner. It
+preserved the application dates, enrolled-student and leave-of-absence conditions,
+2–5-person teams, both funding amounts, and the readable phone/email. An independent
+fixture comparison confirmed the missing three documents and submission channel,
+all four designated topics and detailed-announcement requirement, equipment
+purchases/rental/materials, institute visit/card payment, and activity-funding
+scope/scholarship relationship. Duplicate-support wording retained the same/similar
+topic restriction but left its within-university scope ambiguous. Retained wording
+also added unsupported current-status claims: recruitment beginning “now” and the
+call being “open,” although the printed deadline had passed. English and deterministic
+visual tabs rendered. This was a partial result with 48 affected source-line IDs
+and 27 identified critical facts needing review; those are different metrics.
+This run did not meet complete-output or timing goals, and a structurally valid
+automated verdict must not be treated as semantic proof.
+
+A second fresh hosted original photo exercised KCCI on the same release, with no
+Korean correction and a reused OCR model. The app cleared the prior notice on
+upload and rendered English and visual cards. UI wall time was 173.6 s (170.4 s
+pipeline): OCR 69.3 s, translation 2.5 s / eight requests, semantic 101.1 s / three
+reported calls / 18,090 known tokens. Failed-attempt usage was unavailable, so
+those tokens are incomplete. Expanded timing showed detection 26.1 s,
+recognition 40.1 s, parallel QR 1.6 s, image reading 69.2 s, two small-text checks,
+and latest API/network 104.4 s. QR reached its budget and the already decoded URL
+survived; printed text processing continued.
+
+All six exact printed pairs appeared in both English and visual output: TOEIC
+800, TEPS 309, FLEX 2B, TOEFL iBT 91, TOEIC Speaking 150, and OPIc IM3. Their
+qualification applicability remained unverified. The source-evidence toggle and
+TOEIC/800 link opened the correct original photo with that table cell highlighted.
+The output still omitted important dates, selection stages, preferences and
+documents, and incorrectly attached the essay exam's three-question count to
+aptitude testing. Both runs had no captured browser warning/error logs. Screenshots
+and expanded DOM evidence were saved outside the repository. These findings
+remain failures of complete semantic interpretation despite passing automated
+checks and successful site operation.
+
 The last guards additionally withhold a graduation document missing its explicit
 expected-graduation alternative or interview stage, detached expense noun phrases
 misclassified as restrictions, and bare date/time/question-count cells lacking
