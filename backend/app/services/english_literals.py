@@ -65,7 +65,8 @@ _ENGLISH_DAY_MONTH = re.compile(
 _ENGLISH_DATE_LABEL = re.compile(
     r"\b(?:dates?|deadlines?|period|schedule|opens?|closes?|starts?|ends?|due)"
     r"(?:\s+(?:is|are|on|from|at|by|between))?\s*[:：|]?\s*$"
-    r"|\b(?:apply|applications?|register|registration)\s+(?:by|until|from|on)\s*$",
+    r"|\b(?:apply|applications?|register|registration)\s+(?:by|until|from|on)\s*$"
+    r"|^\s*(?:from|until|through|by|on|between)\s*$",
     re.IGNORECASE,
 )
 _ENGLISH_NUMERIC_MONTH_DAY = re.compile(

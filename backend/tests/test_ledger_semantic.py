@@ -1084,3 +1084,30 @@ def test_clear_enrollment_and_team_cells_survive_incorrect_model_translations():
     assert "5 people" not in digest
     assert len(calls.calls) == 1
     assert outcome.ledger.coverage.semantic_unit_ids == ["U1", "U2"]
+
+
+def test_numeric_stamp_dates_cannot_hide_inside_an_otherwise_readable_block():
+    source = ledger(
+        [
+            ("기간입C이끼지", best_effort_english("기간입C이끼지")),
+            ("학생문화처", "Student Cultural Office"),
+            ("UNIV", "UNIV"),
+            ("9입입부터", best_effort_english("9입입부터")),
+        ],
+        grouped=True,
+    )
+    bad = {
+        "unit_translations": {
+            "U000": "Until 9/16",
+            "U001": "Student Cultural Office",
+            "U002": "UNIV",
+            "U003": "from 9/10",
+        },
+        "block_kinds": {"B000": "document"},
+        "recoveries": [],
+    }
+    outcome = run(source, Responses(bad, bad))
+    digest = simplified_text(outcome.notice)
+    assert "9/16" not in digest and "9/10" not in digest
+    assert "romanized" not in digest
+    assert_survives(outcome)

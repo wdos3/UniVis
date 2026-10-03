@@ -47,7 +47,7 @@ cases, including six KCCI score pairs and the separate essay-question count.
 
 Automated checks (repository root unless noted):
 
-- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,056 tests,
+- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,060 tests,
   including source retention, chunk reconciliation, omission/repair, source-ID
   shifts, incorrect thresholds, enrollment/funding conditions, crop isolation,
   uncertain-source display, and both real-poster geometry fixtures.
@@ -185,6 +185,15 @@ text-height estimation and short-lived paragraphs tracked at horizontal anchors
 avoid the split without joining across a same-anchor section heading. Synthetic
 tilt and section-boundary tests protect those additional mechanics; the observed
 fixture does not invent confidence or polygons absent from the rendered DOM.
+
+The photo 02 repeat on `2f74513` retained the required substantive details and
+63 displayed source IDs (48 translated / 15 fallback), at 39.6 s OCR, 4.4 s MT,
+16.6 s semantic, 63.3 s measured browser elapsed, two requests and 25,059 input /
+1,261 output / 26,320 total tokens. It still fabricated stamp dates as `Until
+9/16` and `from 9/10`, rather than written month names. This is another failed
+fidelity run. Date recognition now covers standalone date prepositions with
+numeric month/day formats. A four-unit regression prevents a readable neighboring
+office/logo block from hiding those unsupported dates.
 
 Detailed OCR profiling of the earlier actual photo 04 run showed model reuse,
 14.5 s detection, 16.1 s recognition, two extra small-text checks and 1.7 s QR

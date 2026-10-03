@@ -599,7 +599,15 @@ def test_standalone_funding_categories_and_amounts_have_deterministic_english(
 
 
 @pytest.mark.parametrize(
-    "english", ["Until September 16", "From September 10, 2026", "Deadline: 9.16"]
+    "english",
+    [
+        "Until September 16",
+        "From September 10, 2026",
+        "Deadline: 9.16",
+        "Until 9/16",
+        "from 9/10",
+        "From 9.10",
+    ],
 )
 def test_calendar_dates_need_evidence_even_when_ocr_contains_no_date(english):
     assert any(
