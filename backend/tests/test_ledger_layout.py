@@ -360,3 +360,51 @@ def test_low_confidence_cannot_turn_a_complete_topic_into_a_discardable_caption(
     result = build_source_ledger([observation])
     assert result.blocks[0].kind != "caption"
     assert result.blocks[0].source_text == observation.source_text
+
+
+def test_wide_paragraph_line_keeps_its_shorter_attached_restriction():
+    units = [
+        unit("title", "연구활동 지원 프로그램", 0.06, 0.04, 0.88, 0.06),
+        unit("left-a", "왼쪽 열의 독립적인 문장", 0.06, 0.2, 0.39),
+        unit("right-a", "오른쪽 열의 독립적인 문장", 0.55, 0.2, 0.4),
+        unit("left-b", "왼쪽 열의 이어지는 설명", 0.06, 0.231, 0.39),
+        unit("right-b", "오른쪽 열의 이어지는 설명", 0.55, 0.231, 0.4),
+        unit(
+            "condition-a",
+            "다른 프로그램에서 지원하는 과제와 동일한 연구를",
+            0.06,
+            0.4,
+            0.88,
+        ),
+        unit("condition-b", "수행하는 경우 지원 및 참여 제한", 0.06, 0.431, 0.39),
+    ]
+    result = build_source_ledger(units)
+    assert any(
+        block.unit_ids == ["condition-a", "condition-b"] for block in result.blocks
+    )
+    assert any(block.unit_ids == ["left-a", "left-b"] for block in result.blocks)
+    assert any(block.unit_ids == ["right-a", "right-b"] for block in result.blocks)
+    assert result.blocks[0].unit_ids == ["title"]
+
+
+def test_actual_contest_prize_grid_keeps_categories_counts_and_amounts_together():
+    fixture = json.loads(
+        (FIXTURES / "campus_video_prizes_geometry.json").read_text(encoding="utf-8")
+    )
+    result = build_source_ledger(
+        [SourceUnit.model_validate(value) for value in fixture["units"]]
+    )
+    by_text = {unit.source_text: unit for unit in result.units}
+    for label, values in (
+        ("최우수상", ["1작품", "팀100만원", "개인 50만원"]),
+        ("우수상", ["3작품", "팀50만원", "개인 25만원"]),
+    ):
+        header = by_text[label]
+        assert header.table_id is not None
+        assert all(
+            (by_text[value].table_id, by_text[value].table_column)
+            == (header.table_id, header.table_column)
+            for value in values
+        )
+    assert by_text["최우수상"].table_column != by_text["우수상"].table_column
+    assert len({unit.id for unit in result.units}) == 11

@@ -1073,7 +1073,15 @@ def _finish(
             fallback.add(unit.id)
     for block, units in groups:
         text = _fallback_text(block, units)
-        if text.startswith(("Source wording (romanized):", "Image detail:")):
+        if any(
+            marker in text
+            for marker in (
+                "Source wording (romanized):",
+                "Image detail:",
+                "Partial English reading:",
+                "Printed values:",
+            )
+        ):
             # Opaque source readings stay beside their crops. They cannot
             # masquerade as instructions by appearing in the English digest.
             for unit in units:

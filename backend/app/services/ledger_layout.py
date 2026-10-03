@@ -392,6 +392,10 @@ def _table_groups(rows: list[list[SourceUnit]]) -> list[list[list[SourceUnit]]]:
                     unit.source_text.strip(),
                 )
                 and re.search(r"\d", unit.source_text)
+                or re.fullmatch(
+                    r"(?:팀|개인)?\s*[\d,.]+\s*(?:만원|원|작품|명|인|개|점)",
+                    unit.source_text.strip(),
+                )
                 for unit in row
             )
             for row in group
@@ -544,9 +548,12 @@ def build_source_ledger(
                 cut
                 and unit.box.x < cut < unit.box.x + unit.box.width
                 and min(cut - unit.box.x, unit.box.x + unit.box.width - cut) > 0.12
+                and _kind(unit, typical_height) == "heading"
             ):
                 column = 0  # Full-width headings precede the column bodies.
             else:
+                # A long paragraph line can cross the gutter while its shorter
+                # continuation ends before it. Keep both at their left origin.
                 column = 2 if cut and unit.box.x >= cut else 1
             columns.setdefault(column, []).append(unit)
         for column, members in sorted(columns.items()):

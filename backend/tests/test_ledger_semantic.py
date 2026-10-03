@@ -1043,3 +1043,44 @@ def test_unreadable_stamp_cannot_invent_a_calendar_date_or_be_dumped_into_instru
     assert outcome.ledger.units[0].source_text == "기간입C이끼지"
     assert outcome.ledger.units[0].english == best_effort_english("기간입C이끼지")
     assert outcome.ledger.units[0].semantic_refs == ["translation_view"]
+
+
+def test_partial_machine_reading_with_romanization_stays_beside_its_source_crop():
+    partial = (
+        "Partial English reading: Attachment 9 From CO\n"
+        "Source wording (romanized): buchak9ipCOimbuteo"
+    )
+    source = ledger([("부착9입CO임부터", partial)])
+    source.units[0].translation_status = "source_crop"
+    source.blocks[0].translation_status = "source_crop"
+    outcome = run(source, Responses(OpenAIError("Provider unavailable")))
+    assert "Attachment 9" not in simplified_text(outcome.notice)
+    assert "romanized" not in simplified_text(outcome.notice)
+    assert outcome.ledger.units[0].english == partial
+    assert outcome.ledger.units[0].semantic_refs == ["translation_view"]
+    assert_survives(outcome)
+
+
+def test_clear_enrollment_and_team_cells_survive_incorrect_model_translations():
+    source = ledger(
+        [
+            ("가상대학교 학부 재학생(휴학생 참가 가능)", ""),
+            ("개인 또는 팀(3인 이내) 참가 가능", ""),
+        ],
+        grouped=True,
+    )
+    calls = Responses(
+        {
+            "unit_translations": {"U000": "Students.", "U001": "Teams of 5 people."},
+            "block_kinds": {"B000": "eligibility"},
+            "recoveries": [],
+        }
+    )
+    outcome = run(source, calls)
+    digest = simplified_text(outcome.notice)
+    assert "Currently enrolled undergraduate students" in digest
+    assert "Students on leave may participate" in digest
+    assert "teams of up to 3 people" in digest
+    assert "5 people" not in digest
+    assert len(calls.calls) == 1
+    assert outcome.ledger.coverage.semantic_unit_ids == ["U1", "U2"]

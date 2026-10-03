@@ -97,6 +97,11 @@ _SOURCE_CONSTRAINTS = (
     (r"장학금", r"\bscholarships?\b", "scholarship category"),
     (r"카드\s*결제", r"\bcard\b", "card-payment procedure"),
     (r"필수", r"\b(?:required|must|mandatory|essential)\b", "mandatory condition"),
+    (
+        r"추첨",
+        r"\b(?:lottery|draw|random(?:ly)?|raffle)\b",
+        "lottery condition",
+    ),
 )
 _COMPARISONS = (
     (
@@ -110,6 +115,11 @@ _COMPARISONS = (
         "inclusive maximum",
     ),
     (
+        "이내",
+        r"\b(?:or less|or fewer|at most|maximum|no more than|up to|within)\b|<=|≤",
+        "inclusive maximum",
+    ),
+    (
         "초과",
         r"\b(?:more than|greater than|exceed\w*)\b|(?<![<>=])>(?!=)",
         "exclusive minimum",
@@ -117,7 +127,7 @@ _COMPARISONS = (
     ("미만", r"\b(?:less than|below|under)\b|(?<![<>=])<(?!=)", "exclusive maximum"),
 )
 _DIGIT_COMPARISON = re.compile(
-    r"([A-Za-z0-9,]+(?:\.[0-9]+)?)[ \t]*(?:점|명|인|개|(?:억|만|천)?\s*원)?[ \t]*(이상|이하|초과|미만)"
+    r"([A-Za-z0-9,]+(?:\.[0-9]+)?)[ \t]*(?:점|명|인|개|(?:억|만|천)?\s*원)?[ \t]*(이상|이하|이내|초과|미만)"
 )
 _DECIMAL_THRESHOLD = re.compile(
     r"(?<![\w.])(\d+\.\d+)\s*(?:점\s*)?(이상|이하|초과|미만)"
@@ -239,6 +249,12 @@ def validate_protected_values(source: str, english: str) -> list[str]:
         )
         if not re.search(pattern, english, re.IGNORECASE):
             issues.append(f"missing {description} for {match[1]}")
+        if (
+            re.fullmatch(r"[\d,.]+", match[1])
+            and not _KRW.search(match.group())
+            and Decimal(match[1].replace(",", "")) not in english_numbers
+        ):
+            issues.append(f"missing numeric threshold: {match[1]}")
     english_pairs = set(_exam_scores(english))
     source_exams = {_exam_label(match.group()) for match in _EXAM.finditer(source)}
     english_exams = {_exam_label(match.group()) for match in _EXAM.finditer(english)}
@@ -418,6 +434,26 @@ def literal_translation(source: str) -> str | None:
         if enrolled[1]:
             text += f" of the {enrolled[1]} academic year"
         return text + "."
+    university_enrolled = re.fullmatch(
+        r"\s*([가-힣]{1,30})대학교\s*학부\s*재학생\s*"
+        r"(?:\(\s*휴학생\s*(?:참가|참여)\s*가능\s*\))?\s*",
+        source,
+    )
+    if university_enrolled:
+        # The source establishes the institution and condition, but not its
+        # official English name. Label the deterministic name transcription.
+        name = _romanize(university_enrolled[1]).capitalize()
+        text = f"Currently enrolled undergraduate students at {name} University (name transliterated)."
+        if "휴학생" in source:
+            text += " Students on leave may participate."
+        return text
+    team = re.fullmatch(
+        r"\s*개인\s*또는\s*팀\s*\(\s*(\d+)\s*(?:인|명)\s*이내\s*\)\s*"
+        r"(?:참가|참여)\s*가능\s*",
+        source,
+    )
+    if team:
+        return f"Individuals or teams of up to {team[1]} people may participate."
     return None
 
 

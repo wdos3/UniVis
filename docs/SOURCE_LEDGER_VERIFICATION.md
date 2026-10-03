@@ -1,4 +1,4 @@
-# Source ledger verification — October 3, 2026
+# Source ledger verification — October 4, 2026
 
 This report distinguishes physical-source retention, displayed-ID coverage,
 literal/condition checks, semantic output and actual photo runs. None of the
@@ -47,7 +47,7 @@ cases, including six KCCI score pairs and the separate essay-question count.
 
 Automated checks (repository root unless noted):
 
-- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,044 tests,
+- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,053 tests,
   including source retention, chunk reconciliation, omission/repair, source-ID
   shifts, incorrect thresholds, enrollment/funding conditions, crop isolation,
   uncertain-source display, and both real-poster geometry fixtures.
@@ -113,7 +113,56 @@ two calls / 26,170 total tokens. Seal noise generated an unsupported September
 date, so this is **failed fidelity evidence**. Four new regressions now require
 date evidence even when a region has no recognized date, and keep opaque
 romanized/crop fallbacks in the source view rather than dumping them into the
-instruction digest. Final live checks follow the corrective deployment.
+instruction digest.
+
+The corrective deployment `cdd2fcf4f449f99214eb94c8d35e88d88b428830`
+(`dpl_DRWa2MtYnzjayCf26UzeykMrQF7d`) was READY on the existing alias. Its
+health endpoint returned HTTP 200 with the same configured model and ledger path.
+Five actual supplied photos were then exercised on that hosted code:
+
+| Photo | Source / translated / fallback / displayed IDs | OCR / MT / semantic | Requests | Input / output / total tokens | Browser elapsed |
+| --- | --- | --- | ---: | --- | ---: |
+| 02, creative research | 63 / 49 / 14 / 63 | 40.1 / 5.2 / 27.0 s | 2 | 29,079 / 1,299 / 30,378 | 75.2 s |
+| 06, KCCI hiring | 99 / 86 / 13 / 99 | 48.0 / 7.5 / 24.7 s | 2 | 31,606 / 1,805 / 33,411 | 83.6 s |
+| 03, Seoul promotion | 40 / 34 / 6 / 40 | 28.7 / 9.7 / 15.1 s | 1 | 18,649 / 669 / 19,318 | 55.4 s |
+| 01, undergraduate research support | 46 / 25 / 21 / 46 | 25.4 / 5.5 / 13.3 s | 2 | 25,602 / 886 / 26,488 | 46.3 s |
+| 04, campus video contest | 76 / 47 / 29 / 76 | 32.2 / 6.5 / 25.4 s | 2 | 27,296 / 1,688 / 28,984 | 66.7 s |
+
+These are measured photo flows, not blanket fidelity passes. The unsupported
+September date disappeared from photo 02; the application dates/documents,
+enrollment, leave exclusion, 2–5 members, duplicate restrictions, all topic options,
+both KRW 200,000 funding categories, spending/card/scholarship rules and contact
+values were visible. Its wrapped leave sentence remained awkward and partial
+stamp readings still leaked into the digest. Photo 06 retained the six thresholds
+(800, 309, 2B, 91, 150 and IM3), essay question count with the essay stage,
+application restrictions, documents and employment conditions; repeated fragments
+and decorative text remained. Photo 03 retained its dates, budget-exhaustion
+condition, 5% cashback, KRW 50,000 monthly cap and KRW 5,000 lottery reward.
+Photo 01 retained its research supervision, documents, dates, KRW 300,000 amount,
+two installments and final-report requirement for the second installment, but
+detached a restriction continuation. Photo 04 retained the prize amounts and
+format/attendance dates but lost their award-category associations in the digest;
+its enrollment/leave/team eligibility remained only as romanization/crops. Clipped
+neighboring poster text was mixed into its additional details. These failures
+motivated the next bounded correction, rather than being counted as successes.
+
+Additional hosted image-translation testing on photo 03 placed 27/40 units,
+retained the source view, and took 39.2 s OCR + 7.7 s translation + 1.8 s drawing
+= 48.7 s overall, with 33 known MT requests and no semantic call. The rendered
+image and original toggle were visually checked. PNG download completion again
+could not be confirmed in the in-app browser. MyMemory omitted the survey lottery
+condition, prompting a deterministic check that prevents that partial reading
+from being painted as a guaranteed reward.
+
+The follow-up correction keeps partial/romanized readings in the crop view even
+when preceded by an English fragment, attaches wide paragraph continuations at
+their left origin, recognizes Korean-labeled numeric prize grids, protects
+inclusive team limits and lottery conditions, and translates only whole explicit
+enrollment/team clauses locally. Institution names in the local enrollment
+fallback are labeled as transliterations rather than asserted official English
+names. An observed 11-cell prize-geometry fixture protects award/amount columns;
+its confidence is unavailable and is not invented. Final hosted checks for this
+correction are recorded below after deployment.
 
 ## Remaining limits
 
@@ -125,8 +174,9 @@ inspectable without making Korean correction a prerequisite for receiving output
 Required keys prevent structural omission but cannot prove arbitrary semantic
 equivalence. Connected-condition grammar, seal/noise classification, unsupported
 paraphrases, and repeated fragments still need broader bilingual evaluation.
-Only photos 02 and 06 were exercised here; the other supplied photos and future
-images are not certified by these results.
+All five supplied photos were exercised, but future images and arbitrary semantic
+accuracy are not certified by these results. The broader runs above exposed real
+layout and wording failures despite full displayed-ID retention.
 
 The 10–15 second target has not been established. Cold model downloads and device
 OCR can exceed it before API processing starts. Crop vision can add significant

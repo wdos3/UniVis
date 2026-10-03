@@ -1,0 +1,148 @@
+{
+  "description": "Observed source text and crop geometry from the actual hosted photo 04 run on cdd2fcf. Boxes reconstructed from rendered crop CSS and original image dimensions; confidence was not exposed and is omitted. No image bytes or model translations included.",
+  "units": [
+    {
+      "id": "page-1-initial-observation-22",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 22,
+      "source_text": "구분",
+      "box": {
+        "x": 0.52395719,
+        "y": 0.64828395,
+        "width": 0.05095819,
+        "height": 0.01740196
+      }
+    },
+    {
+      "id": "page-1-initial-observation-23",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 23,
+      "source_text": "최우수상",
+      "box": {
+        "x": 0.64242122,
+        "y": 0.64730422,
+        "width": 0.08188153,
+        "height": 0.01740196
+      }
+    },
+    {
+      "id": "page-1-initial-observation-24",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 24,
+      "source_text": "우수상",
+      "box": {
+        "x": 0.80879874,
+        "y": 0.64656801,
+        "width": 0.06489547,
+        "height": 0.01838235
+      }
+    },
+    {
+      "id": "page-1-initial-observation-26",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 26,
+      "source_text": "1작품",
+      "box": {
+        "x": 0.65897287,
+        "y": 0.66911713,
+        "width": 0.05182927,
+        "height": 0.01544118
+      }
+    },
+    {
+      "id": "page-1-initial-observation-27",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 27,
+      "source_text": "3작품",
+      "box": {
+        "x": 0.81359098,
+        "y": 0.66764772,
+        "width": 0.05531359,
+        "height": 0.01691176
+      }
+    },
+    {
+      "id": "page-1-initial-observation-28",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 28,
+      "source_text": "시상 규모",
+      "box": {
+        "x": 0.50392009,
+        "y": 0.66838235,
+        "width": 0.08841463,
+        "height": 0.01838235
+      }
+    },
+    {
+      "id": "page-1-initial-observation-30",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 30,
+      "source_text": "팀100만원",
+      "box": {
+        "x": 0.63196897,
+        "y": 0.68847963,
+        "width": 0.10496516,
+        "height": 0.01691176
+      }
+    },
+    {
+      "id": "page-1-initial-observation-31",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 31,
+      "source_text": "팀50만원",
+      "box": {
+        "x": 0.79529639,
+        "y": 0.68750044,
+        "width": 0.09233449,
+        "height": 0.01691176
+      }
+    },
+    {
+      "id": "page-1-initial-observation-32",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 32,
+      "source_text": "상금",
+      "box": {
+        "x": 0.52395719,
+        "y": 0.69852966,
+        "width": 0.05095819,
+        "height": 0.01715686
+      }
+    },
+    {
+      "id": "page-1-initial-observation-33",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 33,
+      "source_text": "개인 50만원",
+      "box": {
+        "x": 0.6302261,
+        "y": 0.70637206,
+        "width": 0.1097561,
+        "height": 0.01544118
+      }
+    },
+    {
+      "id": "page-1-initial-observation-34",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 34,
+      "source_text": "개인 25만원",
+      "box": {
+        "x": 0.78745617,
+        "y": 0.70465725,
+        "width": 0.10801394,
+        "height": 0.01568627
+      }
+    }
+  ]
+}

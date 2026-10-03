@@ -606,3 +606,38 @@ def test_calendar_dates_need_evidence_even_when_ocr_contains_no_date(english):
         issue.startswith("unsupported date:")
         for issue in validate_protected_values("기간입C이끼지", english)
     )
+
+
+@pytest.mark.parametrize("maximum", [3, 5, 12])
+def test_complete_individual_or_team_condition_has_an_exact_local_translation(maximum):
+    source = f"개인 또는 팀({maximum}인 이내) 참가 가능"
+    english = f"Individuals or teams of up to {maximum} people may participate."
+    assert ledger_translation.literal_translation(source) == english
+    assert validate_protected_values(source, english) == []
+    assert validate_protected_values(source, english.replace("up to ", ""))
+    assert validate_protected_values(source, english.replace(str(maximum), "99"))
+
+
+def test_institution_enrollment_and_allowed_leave_keep_their_conditions():
+    source = "가상대학교 학부 재학생(휴학생 참가 가능)"
+    english = ledger_translation.literal_translation(source)
+    assert english == (
+        "Currently enrolled undergraduate students at Gasang University (name transliterated). "
+        "Students on leave may participate."
+    )
+    assert validate_protected_values(source, english) == []
+    assert ledger_translation.literal_translation(source + ", 단 지원금 제외") is None
+
+
+def test_a_survey_lottery_cannot_be_translated_as_a_guaranteed_reward():
+    source = "만족도 조사 참여 시 추첨을 통해 5,000원 상품권 지급"
+    assert "missing lottery condition" in validate_protected_values(
+        source, "Participants in the satisfaction survey receive a KRW 5,000 voucher."
+    )
+    assert (
+        validate_protected_values(
+            source,
+            "Participants in the satisfaction survey receive a KRW 5,000 voucher through a lottery.",
+        )
+        == []
+    )
