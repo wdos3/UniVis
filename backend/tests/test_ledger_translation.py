@@ -596,3 +596,13 @@ def test_standalone_funding_categories_and_amounts_have_deterministic_english(
 ):
     assert ledger_translation.literal_translation(source) == english
     assert validate_protected_values(source, english) == []
+
+
+@pytest.mark.parametrize(
+    "english", ["Until September 16", "From September 10, 2026", "Deadline: 9.16"]
+)
+def test_calendar_dates_need_evidence_even_when_ocr_contains_no_date(english):
+    assert any(
+        issue.startswith("unsupported date:")
+        for issue in validate_protected_values("기간입C이끼지", english)
+    )

@@ -319,15 +319,18 @@ def _explicit_calendar_dates(text: str) -> set[tuple[int | None, int, int]]:
     return {value for value in dates if value[0] is not None or value[1:] not in dated_month_days}
 
 
-def unsupported_source_dates(source_evidence: str, english_text: str) -> list[str]:
+def unsupported_source_dates(
+    source_evidence: str, english_text: str, *, require_evidence: bool = False,
+) -> list[str]:
     """Find explicit English dates that conflict with this field's calendar evidence.
 
     A valid endpoint may represent only part of a quoted range. Missing dates
     are a completeness concern, not a contradiction. An abbreviated source
     date cannot establish a year, which may legitimately come from context.
+    require_evidence also rejects a new date when no source date was recognized.
     """
     source_dates = _explicit_calendar_dates(source_evidence)
-    if not source_dates:
+    if not source_dates and not require_evidence:
         return []
     unsupported = []
     for year, month, day in sorted(_explicit_calendar_dates(english_text), key=lambda value: (value[0] or 0, value[1], value[2])):

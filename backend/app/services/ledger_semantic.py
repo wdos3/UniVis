@@ -1016,6 +1016,11 @@ def _finish(
             unit.translation_status = "source_crop"
             unit.translation_provider = "source-recovery-fallback"
             unit.translation_source_ids = [unit.id]
+        if not _english(unit.english):
+            unit.english = best_effort_english(_effective_source(unit))
+            unit.translation_status = "source_crop"
+            unit.translation_provider = "source-fallback"
+            unit.translation_source_ids = [unit.id]
     covered: set[str] = set()
     for item in items:
         units = [by_id[unit_id] for unit_id in item.source_unit_ids]
@@ -1068,6 +1073,14 @@ def _finish(
             fallback.add(unit.id)
     for block, units in groups:
         text = _fallback_text(block, units)
+        if text.startswith(("Source wording (romanized):", "Image detail:")):
+            # Opaque source readings stay beside their crops. They cannot
+            # masquerade as instructions by appearing in the English digest.
+            for unit in units:
+                unit.semantic_refs = list(
+                    dict.fromkeys([*unit.semantic_refs, "translation_view"])
+                )
+            continue
         heading = section_headings.get(units[0].section_id, "Additional details")
         item = LedgerSemanticItem(
             kind="detail",

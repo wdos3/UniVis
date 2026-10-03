@@ -212,7 +212,7 @@ def validate_protected_values(source: str, english: str) -> list[str]:
     )
     issues.extend(
         f"unsupported date: {value}"
-        for value in unsupported_source_dates(source, english)
+        for value in unsupported_source_dates(source, english, require_evidence=True)
     )
     issues.extend(
         f"unsupported contact: {value}"

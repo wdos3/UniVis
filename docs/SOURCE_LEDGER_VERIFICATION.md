@@ -47,7 +47,7 @@ cases, including six KCCI score pairs and the separate essay-question count.
 
 Automated checks (repository root unless noted):
 
-- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,040 tests,
+- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,044 tests,
   including source retention, chunk reconciliation, omission/repair, source-ID
   shifts, incorrect thresholds, enrollment/funding conditions, crop isolation,
   uncertain-source display, and both real-poster geometry fixtures.
@@ -95,7 +95,25 @@ Its raw OCR says economic/social topics; a different corrected fixture says
 economic/current-affairs topics. The system does not overwrite that conflict from
 a remembered transcription.
 
-Live deployment checks are recorded below after publishing the validated code.
+Initial live release: `802826725f2c0457c684e741e2df4b0298e1d227`, linked project
+`univis-v2-prototype`, deployment `dpl_7ykYKU79PnbrRNS2GoHAThc3CPQw` READY.
+The root and health endpoint returned 200; health confirms `source-ledger-v1`,
+OpenAI configured, `gpt-4o-mini`, MyMemory and public mode. JavaScript/CSS,
+worker, bundled ORT WASM, QR chunk, both OCR model archives and public ORT WASM
+returned 200 with appropriate content types. Python 3.12 and existing static/
+file-based API packaging were confirmed in the Vercel build.
+
+A live KCCI geometry-fixture round trip returned HTTP 200 from both new routes,
+retained all 20 source IDs with English fields, and used mock semantic mode
+(zero OpenAI calls). This verifies API packaging/retention, not model accuracy.
+
+The initial fresh hosted Sogang photo returned English and all requested topic/
+funding values in 69.4 s: OCR 47.5 s, MT 5.2 s / 34 requests, semantic 14.0 s /
+two calls / 26,170 total tokens. Seal noise generated an unsupported September
+date, so this is **failed fidelity evidence**. Four new regressions now require
+date evidence even when a region has no recognized date, and keep opaque
+romanized/crop fallbacks in the source view rather than dumping them into the
+instruction digest. Final live checks follow the corrective deployment.
 
 ## Remaining limits
 

@@ -282,8 +282,9 @@ def test_source_crop_and_romanized_values_remain_when_no_english_can_be_establis
     source.units[0].translation_status = "source_crop"
     source.blocks[0].translation_status = "source_crop"
     outcome = run(source, Responses(OpenAIError("Service unavailable")))
-    assert "Source wording (romanized)" in simplified_text(outcome.notice)
-    assert "25n0" in simplified_text(outcome.notice)
+    assert "Source wording (romanized)" not in simplified_text(outcome.notice)
+    assert "Source wording (romanized)" in outcome.ledger.units[0].english
+    assert "25n0" in outcome.ledger.units[0].english
     assert "02-710-2500" not in simplified_text(outcome.notice)
     assert outcome.ledger.metrics.semantic_requests == 1
     assert outcome.ledger.metrics.input_tokens is None
@@ -349,7 +350,7 @@ def test_invalid_translation_repair_cannot_change_the_source_or_invent_an_amount
     outcome = run(source, Responses(response, LedgerSemanticResponse()))
     assert outcome.ledger.units[0].source_text == "지원금 20만원"
     assert "900,000" not in simplified_text(outcome.notice)
-    assert "KRW 200,000" in simplified_text(outcome.notice)
+    assert "KRW 200,000" in outcome.ledger.units[0].english
     assert_survives(outcome)
 
 
@@ -567,7 +568,7 @@ def test_raw_sogang_fixture_retains_seal_observations_and_corrupted_phone_eviden
         entry["text"] for entry in raw["items"]
     ]
     assert "2500" not in simplified_text(outcome.notice)
-    assert "25n0" in simplified_text(outcome.notice)
+    assert "25n0" in "\n".join(unit.english for unit in outcome.ledger.units)
     assert_survives(outcome)
 
 
@@ -1029,3 +1030,16 @@ def test_fluent_semantic_english_does_not_hide_an_unrecovered_uncertain_source_c
     assert outcome.ledger.coverage.semantic_unit_ids == ["U1"]
     assert outcome.ledger.coverage.fallback_unit_ids == ["U1"]
     assert outcome.ledger.coverage.translated_unit_ids == []
+
+
+def test_unreadable_stamp_cannot_invent_a_calendar_date_or_be_dumped_into_instructions():
+    source = ledger([("기간입C이끼지", best_effort_english("기간입C이끼지"))])
+    source.units[0].translation_status = "source_crop"
+    source.blocks[0].translation_status = "source_crop"
+    response = LedgerSemanticResponse(items=[item(["U1"], "Until September 16")])
+    outcome = run(source, Responses(response, response))
+    assert "September 16" not in simplified_text(outcome.notice)
+    assert "romanized" not in simplified_text(outcome.notice)
+    assert outcome.ledger.units[0].source_text == "기간입C이끼지"
+    assert outcome.ledger.units[0].english == best_effort_english("기간입C이끼지")
+    assert outcome.ledger.units[0].semantic_refs == ["translation_view"]
