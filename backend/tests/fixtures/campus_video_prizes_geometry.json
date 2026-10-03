@@ -1,5 +1,5 @@
 {
-  "description": "Observed source text and crop geometry from the actual hosted photo 04 run on cdd2fcf. Boxes reconstructed from rendered crop CSS and original image dimensions; confidence was not exposed and is omitted. No image bytes or model translations included.",
+  "description": "Observed prize cells and adjacent ceremony paragraphs from the actual hosted photo 04 run on cdd2fcf. Boxes reconstructed from rendered crop CSS and original image dimensions; confidence was not exposed and is omitted. No image bytes or model translations included.",
   "units": [
     {
       "id": "page-1-initial-observation-22",
@@ -142,6 +142,58 @@
         "y": 0.70465725,
         "width": 0.10801394,
         "height": 0.01568627
+      }
+    },
+    {
+      "id": "page-1-initial-observation-38",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 38,
+      "source_text": "시상식",
+      "box": {
+        "x": 0.48649794,
+        "y": 0.75343096,
+        "width": 0.06358885,
+        "height": 0.01691176
+      }
+    },
+    {
+      "id": "page-1-initial-observation-40",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 40,
+      "source_text": "2026.10.26(월) 서강글로벌사회공헌원 비전선포식",
+      "box": {
+        "x": 0.48562673,
+        "y": 0.77475588,
+        "width": 0.44120209,
+        "height": 0.02156863
+      }
+    },
+    {
+      "id": "page-1-initial-observation-42",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 42,
+      "source_text": "수상작 전시 및 시상식 진행(수상자 1인 이상 필참)",
+      "box": {
+        "x": 0.48562801,
+        "y": 0.79142159,
+        "width": 0.41637631,
+        "height": 0.02181373
+      }
+    },
+    {
+      "id": "page-1-initial-observation-44",
+      "image_id": "campus-photo-04",
+      "page_number": 1,
+      "order": 44,
+      "source_text": "유의사항 및 문의사항",
+      "box": {
+        "x": 0.48562748,
+        "y": 0.8188725,
+        "width": 0.18945993,
+        "height": 0.02009804
       }
     }
   ]

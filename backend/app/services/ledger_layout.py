@@ -370,6 +370,17 @@ def _table_groups(rows: list[list[SourceUnit]]) -> list[list[list[SourceUnit]]]:
             ]
             if any(unit.id in consumed for unit in candidate):
                 continue
+            if any(
+                sum(
+                    unit.box.x < center < unit.box.x + unit.box.width
+                    for center in centers
+                )
+                > 1
+                for unit in candidate
+            ):
+                # A paragraph spanning column anchors cannot be assigned to
+                # one table cell. It starts the next section instead.
+                break
             if not _short_cells(candidate) or not _aligned(group[0], candidate):
                 continue
             previous_bottom = max(unit.box.y + unit.box.height for unit in group[-1])
@@ -379,6 +390,15 @@ def _table_groups(rows: list[list[SourceUnit]]) -> list[list[list[SourceUnit]]]:
             if gap > max(unit.box.height for unit in candidate) * 2.5:
                 break
             group.append(candidate)
+        # A trailing label without a value belongs to the following section,
+        # rather than an extra data row in this grid.
+        while (
+            len(group) > 1
+            and len(group[-1]) == 1
+            and _aligned([group[0][0]], group[-1])
+            and not re.search(r"\d", group[-1][0].source_text)
+        ):
+            group.pop()
         # Require both a repeated grid and literal values. Side-by-side
         # headings followed by two prose columns are not a score table.
         has_values = any(

@@ -160,9 +160,24 @@ their left origin, recognizes Korean-labeled numeric prize grids, protects
 inclusive team limits and lottery conditions, and translates only whole explicit
 enrollment/team clauses locally. Institution names in the local enrollment
 fallback are labeled as transliterations rather than asserted official English
-names. An observed 11-cell prize-geometry fixture protects award/amount columns;
+names. An observed 15-unit prize/adjacent-paragraph geometry fixture protects award/amount columns and table boundaries;
 its confidence is unavailable and is not invented. Final hosted checks for this
 correction are recorded below after deployment.
+
+On `af6034e8047143483cbcecb2031a51b75713aad8`, the repeated actual photo 04
+showed enrollment, leave permission and teams of up to three, and restored both
+award columns. It retained 76 source/display IDs, with 50 translated and 26
+fallback units; OCR 38.8 s, MT 6.3 s and semantic 15.0 s, one request with
+22,855 input / 1,071 output / 23,926 total tokens. The table incorrectly absorbed
+the adjacent ceremony paragraphs. The expanded observed fixture reproduced this
+failure before the boundary fix and passed afterward. The fix rejects a paragraph
+spanning multiple column anchors and trims a trailing label with no values;
+those units remain in ordinary source blocks.
+
+Detailed OCR profiling of the earlier actual photo 04 run showed model reuse,
+14.5 s detection, 16.1 s recognition, two extra small-text checks and 1.7 s QR
+work in parallel, for 32.2 s acquisition. This confirms that substantial OCR
+latency persists after initialization; it is not solely a cold-download delay.
 
 ## Remaining limits
 

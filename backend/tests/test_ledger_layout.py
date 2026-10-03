@@ -407,4 +407,11 @@ def test_actual_contest_prize_grid_keeps_categories_counts_and_amounts_together(
             for value in values
         )
     assert by_text["최우수상"].table_column != by_text["우수상"].table_column
-    assert len({unit.id for unit in result.units}) == 11
+    assert len({unit.id for unit in result.units}) == 15
+    for source in (
+        "시상식",
+        "2026.10.26(월) 서강글로벌사회공헌원 비전선포식",
+        "수상작 전시 및 시상식 진행(수상자 1인 이상 필참)",
+        "유의사항 및 문의사항",
+    ):
+        assert by_text[source].table_id is None
