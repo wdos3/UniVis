@@ -3,6 +3,58 @@ export interface BoundingBox { x: number; y: number; width: number; height: numb
 export interface OcrSpan { text: string; box: BoundingBox; confidence?: number }
 export interface ClientOcrPage { text: string; spans?: OcrSpan[] }
 
+export interface SourcePoint { x: number; y: number }
+export type UnitTranslationStatus = 'pending' | 'translated' | 'literal' | 'source_crop'
+export interface SourceUnit {
+  id: string
+  page_number: number
+  image_id: string
+  order: number
+  source_text: string
+  recovered_source_text?: string | null
+  recovery_source?: 'ocr_candidate' | 'vision' | null
+  box: BoundingBox | null
+  polygon: SourcePoint[]
+  confidence: number | null
+  alternatives: { text: string; confidence?: number | null; pass_name: string }[]
+  block_id: string
+  section_id: string
+  table_id: string | null
+  table_row: number | null
+  table_column: number | null
+  english: string
+  translation_provider: string
+  translation_status: UnitTranslationStatus
+  translation_source_ids: string[]
+  semantic_refs: string[]
+  display_destinations: string[]
+}
+export interface SourceBlock {
+  id: string
+  unit_ids: string[]
+  kind: 'heading' | 'paragraph' | 'list' | 'table_cell' | 'caption' | 'condition'
+  section_id: string
+  source_text: string
+  english: string
+  translation_status: UnitTranslationStatus
+  table_id: string | null
+  table_row: number | null
+  table_column: number | null
+}
+export interface SourceLedger {
+  units: SourceUnit[]
+  blocks: SourceBlock[]
+  coverage: {
+    source_unit_ids: string[]; translated_unit_ids: string[]; displayed_unit_ids: string[]
+    semantic_unit_ids: string[]; fallback_unit_ids: string[]; protected_value_gaps: string[]; meaning_checked: boolean
+  }
+  metrics: {
+    ocr_ms: number; layout_ms: number; translation_ms: number; semantic_ms: number; validation_ms: number; rendering_ms: number
+    translation_requests: number; semantic_requests: number; input_tokens?: number | null; output_tokens?: number | null
+    total_tokens?: number | null; usage_complete: boolean
+  }
+}
+
 export interface GroundedItem {
   source_evidence: string
   source_fact_ids: string[]
@@ -95,6 +147,7 @@ export interface FidelityReport {
 }
 
 export interface AnalysisResult {
+  source_ledger?: SourceLedger | null
   id: string
   created_at: string
   original_text: string

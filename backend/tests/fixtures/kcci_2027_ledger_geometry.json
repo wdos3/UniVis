@@ -1,0 +1,287 @@
+{
+  "description": "Actual browser OCR geometry excerpt from the local KCCI hiring photo; contains duplicate crop-pass observations and the essay-question fragment. No image bytes.",
+  "source_artifact": "score-geometry-request.json",
+  "image_filename": "KakaoTalk_20260916_180230755_06.jpg",
+  "units": [
+    {
+      "id": "kcci-23",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 23,
+      "source_text": "TOEFL",
+      "box": {
+        "x": 0.7569686411149826,
+        "y": 0.55,
+        "width": 0.04529616724738672,
+        "height": 0.009803921568627416
+      },
+      "confidence": 0.9983685255050659
+    },
+    {
+      "id": "kcci-24",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 24,
+      "source_text": "TOEIC",
+      "box": {
+        "x": 0.8349303135888502,
+        "y": 0.55,
+        "width": 0.04181184668989546,
+        "height": 0.00955882352941173
+      },
+      "confidence": 0.9991692066192627
+    },
+    {
+      "id": "kcci-26",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 26,
+      "source_text": "TOEIC",
+      "box": {
+        "x": 0.5291811846689896,
+        "y": 0.5549019607843138,
+        "width": 0.04137630662020908,
+        "height": 0.010049019607843102
+      },
+      "confidence": 0.9971760034561157
+    },
+    {
+      "id": "kcci-27",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 27,
+      "source_text": "TEPS",
+      "box": {
+        "x": 0.6071428571428571,
+        "y": 0.5556372549019608,
+        "width": 0.03745644599303144,
+        "height": 0.009313725490196045
+      },
+      "confidence": 0.9995232820510864
+    },
+    {
+      "id": "kcci-28",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 28,
+      "source_text": "FLEX",
+      "box": {
+        "x": 0.6833623693379791,
+        "y": 0.5549019607843138,
+        "width": 0.03789198606271771,
+        "height": 0.010049019607843102
+      },
+      "confidence": 0.9996290355920792
+    },
+    {
+      "id": "kcci-29",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 29,
+      "source_text": "OPIC",
+      "box": {
+        "x": 0.9155052264808362,
+        "y": 0.5544117647058824,
+        "width": 0.04006968641114983,
+        "height": 0.0117647058823529
+      },
+      "confidence": 0.8738610744476318
+    },
+    {
+      "id": "kcci-30",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 30,
+      "source_text": "(iBT)",
+      "box": {
+        "x": 0.7613240418118467,
+        "y": 0.5598039215686275,
+        "width": 0.03789198606271782,
+        "height": 0.011519607843137214
+      },
+      "confidence": 0.9967382669448852
+    },
+    {
+      "id": "kcci-31",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 31,
+      "source_text": "Speaking",
+      "box": {
+        "x": 0.820993031358885,
+        "y": 0.5593137254901961,
+        "width": 0.07229965156794427,
+        "height": 0.012745098039215641
+      },
+      "confidence": 0.9722766578197479
+    },
+    {
+      "id": "kcci-32",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 32,
+      "source_text": "800 이상",
+      "box": {
+        "x": 0.5204703832752613,
+        "y": 0.5784313725490197,
+        "width": 0.059668989547038365,
+        "height": 0.010784313725490158
+      },
+      "confidence": 0.9398420949776968
+    },
+    {
+      "id": "kcci-33",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 33,
+      "source_text": "309 이상",
+      "box": {
+        "x": 0.5962543554006968,
+        "y": 0.5786764705882353,
+        "width": 0.060104529616724744,
+        "height": 0.010784313725490158
+      },
+      "confidence": 0.9940030872821808
+    },
+    {
+      "id": "kcci-34",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 34,
+      "source_text": "2B 이상",
+      "box": {
+        "x": 0.6763937282229965,
+        "y": 0.5786764705882353,
+        "width": 0.05270034843205573,
+        "height": 0.011029411764705843
+      },
+      "confidence": 0.9814874291419983
+    },
+    {
+      "id": "kcci-35",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 35,
+      "source_text": "91 이상",
+      "box": {
+        "x": 0.7552264808362369,
+        "y": 0.578921568627451,
+        "width": 0.04965156794425096,
+        "height": 0.011029411764705843
+      },
+      "confidence": 0.937807023525238
+    },
+    {
+      "id": "kcci-36",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 36,
+      "source_text": "150이상",
+      "box": {
+        "x": 0.8292682926829268,
+        "y": 0.5794117647058824,
+        "width": 0.058362369337979114,
+        "height": 0.010294117647058787
+      },
+      "confidence": 0.9997122764587403
+    },
+    {
+      "id": "kcci-37",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 37,
+      "source_text": "IM3 이상",
+      "box": {
+        "x": 0.9076655052264808,
+        "y": 0.5801470588235295,
+        "width": 0.058797909407665494,
+        "height": 0.00955882352941173
+      },
+      "confidence": 0.9496613641579946
+    },
+    {
+      "id": "kcci-52",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 52,
+      "source_text": "논술시험",
+      "box": {
+        "x": 0.6798780487804879,
+        "y": 0.7188725490196078,
+        "width": 0.04616724738675948,
+        "height": 0.00955882352941173
+      },
+      "confidence": 0.9993105530738831
+    },
+    {
+      "id": "kcci-65",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 65,
+      "source_text": "논술:경제/사회분야",
+      "box": {
+        "x": 0.6702961672473867,
+        "y": 0.7384803921568628,
+        "width": 0.06576655052264813,
+        "height": 0.008088235294117618
+      },
+      "confidence": 0.9813760459423065
+    },
+    {
+      "id": "kcci-71",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 71,
+      "source_text": "3문제 내외",
+      "box": {
+        "x": 0.686411149825784,
+        "y": 0.746078431372549,
+        "width": 0.0331010452961672,
+        "height": 0.005392156862745079
+      },
+      "confidence": 0.9413259426752726
+    },
+    {
+      "id": "kcci-90",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 90,
+      "source_text": "OPIc",
+      "box": {
+        "x": 0.9172473867595818,
+        "y": 0.5549019607843138,
+        "width": 0.03745644599303144,
+        "height": 0.010784313725490158
+      },
+      "confidence": 0.8323014229536057
+    },
+    {
+      "id": "kcci-91",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 91,
+      "source_text": "150 이상",
+      "box": {
+        "x": 0.8288327526132404,
+        "y": 0.5791666666666667,
+        "width": 0.058797909407665494,
+        "height": 0.011029411764705843
+      },
+      "confidence": 0.9625224471092224
+    },
+    {
+      "id": "kcci-106",
+      "page_number": 1,
+      "image_id": "kcci-photo-06",
+      "order": 106,
+      "source_text": "논술:경제/사회 분야",
+      "box": {
+        "x": 0.6729094076655052,
+        "y": 0.740686274509804,
+        "width": 0.062282229965156755,
+        "height": 0.0051470588235293935
+      },
+      "confidence": 0.9485947652296587
+    }
+  ]
+}

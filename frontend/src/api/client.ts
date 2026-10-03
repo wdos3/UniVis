@@ -1,4 +1,4 @@
-import type { AnalysisResult, ClientOcrPage, DemoSummary, ImageDemoSummary, NoticeData } from '../types'
+import type { AnalysisResult, ClientOcrPage, DemoSummary, ImageDemoSummary, NoticeData, SourceLedger, SourceUnit } from '../types'
 
 export interface ImageTextTranslation {
   id: string
@@ -73,6 +73,15 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  translateLedger: (units: SourceUnit[], ocrLatencyMs = 0, layoutLatencyMs = 0, signal?: AbortSignal) => request<SourceLedger>('/api/translate-ledger', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ units, ocr_latency_ms: ocrLatencyMs, layout_latency_ms: layoutLatencyMs }), signal,
+  }),
+  analyzeLedger: (ledger: SourceLedger, provider: string, inputType: 'camera_photo' | 'uploaded_image',
+    regions: { unit_ids: string[]; data_url: string }[] = [], signal?: AbortSignal) => request<AnalysisResult>('/api/analyze-ledger', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ledger, provider, input_type: inputType, regions }), signal,
+  }),
   translateImageText: (regions: { id: string; text: string }[], signal?: AbortSignal) => request<ImageTextTranslationResult>('/api/translate-image-text', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ regions, target_language: 'en' }), signal,

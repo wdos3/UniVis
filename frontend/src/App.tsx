@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight, BookOpenCheck, ChevronDown, Download, Eye, EyeOff, FileText, FlaskConical,
   Image as ImageIcon, LayoutDashboard, LoaderCircle, LockKeyhole, PanelTop, Upload, WandSparkles,
@@ -13,8 +13,12 @@ import { isBrowserOcrSupported, recognizeImages, type BrowserOcrMetrics, type Br
 import { correctedOcrPage } from './ocr/correctedOcrPage'
 import { AdminView } from './pages/AdminView'
 import { ImageTranslator } from './imageTranslation/ImageTranslator'
+import { SourceLedgerView } from './components/SourceLedgerView'
+import { fallbackLedger, pendingLedger, reconcileLedger, recordLedgerDisplay, unitsFromPages } from './ledger/sourceLedger'
+import { recoveryCrops } from './ledger/crops'
+import { translateSourceLedger } from './ledger/translateLedger'
 import { ResearchMode } from './research/ResearchMode'
-import type { AnalysisResult, DemoQuestion, DemoSummary, ImageDemoSummary } from './types'
+import type { AnalysisResult, DemoQuestion, DemoSummary, ImageDemoSummary, SourceLedger } from './types'
 
 type Tab = 'original' | 'translation' | 'simplified' | 'visual'
 type View = 'workspace' | 'research' | 'admin' | 'image-translation'
@@ -58,6 +62,9 @@ function App() {
   const [imageAnalysisStatus, setImageAnalysisStatus] = useState<ImageAnalysisStatus>('checking')
   const [publicMode, setPublicMode] = useState(true)
   const [result, setResult] = useState<AnalysisResult | null>(null)
+  const [sourceLedger, setSourceLedger] = useState<SourceLedger | null>(null)
+  const [ledgerPending, setLedgerPending] = useState(false)
+  const [ledgerMessage, setLedgerMessage] = useState('')
   const [activeTab, setActiveTab] = useState<Tab>('visual')
   const [showEvidence, setShowEvidence] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -71,6 +78,10 @@ function App() {
   const imageSelectionVersion = useRef(0)
   const resultImageUrls = useRef<string[]>([])
   const resultImageOwnerId = useRef<string | null>(null)
+  const ledgerDisplayed = useCallback((ids: string[], renderingMs: number) => {
+    setSourceLedger((previous) => previous ? recordLedgerDisplay(previous, ids, renderingMs) : previous)
+    setResult((previous) => previous?.source_ledger ? { ...previous, source_ledger: recordLedgerDisplay(previous.source_ledger, ids, renderingMs) } : previous)
+  }, [])
 
   useEffect(() => { imagePagesRef.current = imagePages }, [imagePages])
   useEffect(() => () => {
@@ -82,11 +93,11 @@ function App() {
     Promise.all([api.demos(), api.imageDemos()]).then(([demoData, imageDemoData]) => { setDemos(demoData); setImageDemos(imageDemoData) }).catch((problem) => setError(problem instanceof Error ? problem.message : 'Could not load the examples.'))
     api.health().then((health) => {
       setOpenaiConfigured(health.openai_configured)
-      setImageAnalysisStatus(isBrowserOcrSupported() ? 'ready' : 'unavailable')
+      setImageAnalysisStatus('ready')
       setPublicMode(health.public_mode !== false)
     }).catch((problem) => {
-      setImageAnalysisStatus('error')
-      setError(problem instanceof Error ? problem.message : 'Could not connect to the backend.')
+      setImageAnalysisStatus('ready')
+      setError(`Server connection is unavailable (${problem instanceof Error ? problem.message : 'network request ended'}). You can still preserve source regions locally.`)
     })
   }, [])
 
@@ -102,6 +113,9 @@ function App() {
     clearResultImages()
     setPhotoTimings(null)
     setResult(analyzed)
+    setSourceLedger(analyzed.source_ledger ?? null)
+    setLedgerPending(false)
+    setLedgerMessage('')
   }
 
   function attachLocalImages(analyzed: AnalysisResult, pages: ImageDraft[]): AnalysisResult {
@@ -146,6 +160,9 @@ function App() {
     setShowOcrCorrection(false)
     setSourceCorrections([])
     setPhotoTimings(null)
+    setSourceLedger(null)
+    setLedgerPending(false)
+    setLedgerMessage('')
   }
 
   function clearImageAnalysis() {
@@ -220,6 +237,10 @@ function App() {
   }
 
   async function submitRecoveredPages(draft: OcrDraft, pages: ImageDraft[], selectionVersion: number) {
+    if (draft.pages.some((page) => page.source_units !== undefined)) {
+      await submitSourceLedger(draft, pages, selectionVersion)
+      return
+    }
     const analyzed = await analyzeClientOcrWithTiming(draft, provider, (serverRequestMs) => {
       if (selectionVersion === imageSelectionVersion.current) {
         setPhotoTimings({ ...draft.metrics, serverRequestMs })
@@ -234,13 +255,60 @@ function App() {
     setActiveTab('simplified')
   }
 
+  async function submitSourceLedger(draft: OcrDraft, pages: ImageDraft[], selectionVersion: number) {
+    const current = () => selectionVersion === imageSelectionVersion.current
+    // eslint-disable-next-line react-hooks/purity -- This async routine runs only from Analyze/Retry event handlers.
+    const started = performance.now()
+    let ledger = pendingLedger(unitsFromPages(draft.pages, pages.map((page) => page.id)), draft.metrics.latencyMs)
+    setLedgerPending(true)
+    setLedgerMessage('Translating source details…')
+    try {
+      const translated = await translateSourceLedger(ledger)
+      if (!current()) return
+      ledger = reconcileLedger(ledger, translated)
+    } catch {
+      if (!current()) return
+      ledger = fallbackLedger(ledger)
+      setLedgerMessage('The translation connection ended. Source regions remain available while English instructions are prepared.')
+    }
+    // eslint-disable-next-line react-hooks/purity -- Measured after an event-triggered async request, outside render.
+    const translationRequestMs = Math.round(performance.now() - started)
+    if (!current()) return
+    setSourceLedger(ledger)
+    setLedgerMessage('Translation is available. Organizing English instructions…')
+    setProgressStage(2)
+    try {
+      const regions = await recoveryCrops(ledger, pages.map((page, index) => ({ page_number: index + 1, url: page.previewUrl, file: page.file })))
+      if (!current()) return
+      const analyzed = await api.analyzeLedger(ledger, provider, draft.source, regions)
+      if (!current()) return
+      const finalLedger = analyzed.source_ledger ? reconcileLedger(ledger, analyzed.source_ledger) : ledger
+      setSourceLedger(finalLedger)
+      setResult(attachLocalImages({ ...analyzed, source_ledger: finalLedger }, pages))
+      setOcrDraft(draft)
+      setShowOcrCorrection(false)
+      setSourceCorrections([])
+      setQuestions([])
+      setActiveTab('simplified')
+      setLedgerMessage('')
+    } catch (problem) {
+      if (!current()) return
+      setLedgerMessage(`The source translation remains available. Instruction processing ended: ${problem instanceof Error ? problem.message : 'service connection ended'}`)
+    } finally {
+      if (current()) {
+        setLedgerPending(false)
+        setPhotoTimings({ ...draft.metrics, serverRequestMs: Math.round(performance.now() - started), translationRequestMs })
+      }
+    }
+  }
+
   async function analyzeImages() {
     if (!imagePages.length || imageAnalysisStatus !== 'ready') return
     const pages = [...imagePages]
     const selectionVersion = imageSelectionVersion.current
     clearResultImages(); setResult(null); setQuestions([])
     setOcrDraft(null); setShowOcrCorrection(false)
-    setSourceCorrections([]); setPhotoTimings(null)
+    setSourceCorrections([]); setPhotoTimings(null); setSourceLedger(null); setLedgerMessage('')
     setBusy(true); setProcessingImages(true); setError(''); setProgressStage(0); setOcrCompleted(0)
     let recovered: OcrDraft | null = null
     try {
@@ -304,15 +372,16 @@ function App() {
 
     <main id="top">
       <section className="hero page-shell">
-        <div className="hero-copy"><span className="eyebrow-text">Korean OCR → Translation → Semantic analysis → Completeness audit</span><h1>Turn complex notices into <em>clear next steps.</em></h1><p>VisNotice Version 2 separates text recovery, translation, and evidence-grounded interpretation, then checks the English digest for omitted details.</p>
-          <div className="trust-row"><span><LockKeyhole size={15} />Source evidence retained</span><span><BookOpenCheck size={15} />Facts checked for coverage</span></div>
+        <div className="hero-copy"><span className="eyebrow-text">Source layout → Translation → English instructions</span><h1>Turn complex notices into <em>clear next steps.</em></h1><p>VisNotice Version 2 keeps recovered source regions connected to their translations while organizing the notice into English instructions.</p>
+          <div className="trust-row"><span><LockKeyhole size={15} />Source evidence retained</span><span><BookOpenCheck size={15} />Every recovered region retained</span></div>
         </div>
         <div className="hero-motif" aria-hidden="true"><div className="paper-card back"><span /><span /><span /></div><div className="paper-card front"><span className="paper-label">Next step</span><strong>Prepare documents</strong><div className="mini-check"><i>✓</i>Passport</div><div className="mini-check"><i>✓</i>Residence Card</div></div><ArrowRight className="motif-arrow" /></div>
       </section>
 
       <section className="workspace page-shell">
         <div className="workspace-heading"><div><span className="section-number">01</span><div><h2>Capture a notice</h2><p>{imageAnalysisStatus === 'unavailable' ? 'Paste Korean text, upload a text-based document, or try a synthetic notice.' : 'Take a photo, combine image pages, upload a PDF, or paste Korean text.'}</p></div></div><label className="language-select">Output language<select disabled aria-label="Output language"><option>English</option></select><ChevronDown size={14} /></label></div>
-        <ImageInputPanel pages={imagePages} demos={imageDemos} status={imageAnalysisStatus} busy={busy} processingImages={processingImages} progressStage={progressStage} ocrCompleted={ocrCompleted} onAdd={addImages} onRemove={removeImage} onMove={moveImage} onAnalyze={analyzeImages} onLoadDemo={loadImageDemo} recoveredPages={showOcrCorrection ? ocrDraft?.pages ?? null : null} sourceCorrections={sourceCorrections} photoTimings={photoTimings} onEditRecoveredPage={editRecoveredPage} onRetryAnalysis={retryImageAnalysis} />
+        <ImageInputPanel pages={imagePages} demos={imageDemos} status={imageAnalysisStatus} localOcrAvailable={isBrowserOcrSupported()} busy={busy} processingImages={processingImages} progressStage={progressStage} ocrCompleted={ocrCompleted} onAdd={addImages} onRemove={removeImage} onMove={moveImage} onAnalyze={analyzeImages} onLoadDemo={loadImageDemo} recoveredPages={showOcrCorrection ? ocrDraft?.pages ?? null : null} sourceCorrections={sourceCorrections} photoTimings={photoTimings} onEditRecoveredPage={editRecoveredPage} onRetryAnalysis={retryImageAnalysis} />
+        {sourceLedger && (!result || ledgerPending) && <><p role="status">{ledgerMessage}</p><SourceLedgerView ledger={sourceLedger} pending={ledgerPending} onDisplayed={ledgerDisplayed} pages={imagePages.map((page, index) => ({ page_number: index + 1, url: page.previewUrl, file: page.file }))} /></>}
         <div className="input-divider"><span>or use a document / text source</span></div>
         <div className="secondary-methods"><input ref={fileInput} hidden type="file" accept=".pdf,.txt" onChange={(event) => event.target.files?.[0] && upload(event.target.files[0])} /><button className="secondary-button" disabled={busy} onClick={() => fileInput.current?.click()}><Upload size={17} />Upload text-based PDF or TXT</button><button className="secondary-button" disabled={busy} onClick={() => textArea.current?.focus()}><FileText size={17} />Paste Korean text</button></div>
         <div className="input-grid">
@@ -324,27 +393,28 @@ function App() {
           <aside className="demo-card"><span className="eyebrow-text">Start with an example</span><h3>Synthetic notice library</h3><p>Fictional examples exercise deadlines, conditions, documents, and exceptions.</p><div className="demo-list">{demos.map((demo) => <button key={demo.id} disabled={busy} onClick={() => loadDemo(demo.id)}><span>{demo.category}</span><strong>{demo.title}</strong><ArrowRight size={15} /></button>)}</div></aside>
         </div>
         <div className="generate-bar"><label>Semantic provider<select value={provider} disabled={busy} onChange={(event) => setProvider(event.target.value)}><option value="auto">Auto {openaiConfigured ? '(OpenAI)' : '(mock fallback)'}</option><option value="mock">Mock / demo only</option><option value="openai" disabled={!openaiConfigured}>OpenAI {!openaiConfigured && '— key not configured'}</option></select></label><button className="generate-button" disabled={busy || showOcrCorrection || !text.trim()} onClick={generate}>{busy ? <LoaderCircle className="spin" size={18} /> : <WandSparkles size={18} />}{busy ? 'Analyzing…' : 'Generate instructions'}</button></div>
-        <p className="privacy-note"><LockKeyhole size={14} />Notice photos stay in this browser; recognized text and any locally decoded QR URLs are sent to this site's server for translation and analysis. Text-based PDF/TXT uploads and generated results are stored on the server. Extracted text may be sent to the translation service. The semantic provider receives recognized Korean text; document and text analysis can also include the temporary translation.</p>
+        <p className="privacy-note"><LockKeyhole size={14} />Original images remain on your device. Recognized text and layout are sent for translation and analysis. Up to four bounded recovery crops, including a reduced page when OCR is unavailable, may be sent to OpenAI through the API; recovery images are not stored. Text-based PDF/TXT uploads and generated text results are stored on the server. Extracted text may be sent to the translation service.</p>
         {error && <p className="error-message" role="alert">{error}</p>}
       </section>
 
       {result && <section className="results page-shell">
-        <div className="results-heading"><div><span className="section-number">02</span><div><span className="eyebrow-text">{result.acquisition.english_coverage_status === 'partial' ? 'Partial interpretation' : 'Analysis complete'} · {result.provider}</span><h2>{result.notice.title}</h2></div></div><div className="result-tools"><label className="toggle"><input type="checkbox" checked={showEvidence} onChange={(event) => setShowEvidence(event.target.checked)} /><span>{showEvidence ? <Eye size={16} /> : <EyeOff size={16} />}{showEvidence ? 'Evidence shown' : 'Show source evidence'}</span></label><button className="secondary-button" onClick={() => window.print()}><Download size={16} />Print / Save PDF</button></div></div>
-        {result.acquisition.english_coverage_status === 'partial' && ocrDraft && !showOcrCorrection && <div><button className="secondary-button" disabled={busy || imageAnalysisStatus !== 'ready'} onClick={retryImageAnalysis}>{busy ? <LoaderCircle className="spin" size={16} /> : <WandSparkles size={16} />}Retry English interpretation</button><p className="muted">Uses the text already read from your photo. You do not need to type Korean.</p></div>}
+        <div className="results-heading"><div><span className="section-number">02</span><div><span className="eyebrow-text">{result.source_ledger ? 'English instructions' : result.acquisition.english_coverage_status === 'partial' ? 'Partial interpretation' : 'Analysis complete'} · {result.provider}</span><h2>{result.notice.title}</h2></div></div><div className="result-tools"><label className="toggle"><input type="checkbox" checked={showEvidence} onChange={(event) => setShowEvidence(event.target.checked)} /><span>{showEvidence ? <Eye size={16} /> : <EyeOff size={16} />}{showEvidence ? 'Evidence shown' : 'Show source evidence'}</span></label><button className="secondary-button" onClick={() => window.print()}><Download size={16} />Print / Save PDF</button></div></div>
+        {!result.source_ledger && result.acquisition.english_coverage_status === 'partial' && ocrDraft && !showOcrCorrection && <div><button className="secondary-button" disabled={busy || imageAnalysisStatus !== 'ready'} onClick={retryImageAnalysis}>{busy ? <LoaderCircle className="spin" size={16} /> : <WandSparkles size={16} />}Retry English interpretation</button><p className="muted">Uses the text already read from your photo. You do not need to type Korean.</p></div>}
         {result.acquisition.metrics_complete === false && <p className="muted">Known request counts and available token usage are shown; failed provider attempts could not be fully measured.</p>}
         {!result.korean_detected && <div className="inline-notice" role="status">The notice does not appear to be primarily Korean. Analysis was allowed, but the source language should be reviewed.</div>}
-        <div className="image-metrics"><div><ImageIcon size={18} /><span>OCR<strong>{result.acquisition.ocr_provider} · {(result.acquisition.ocr_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Translation<strong>{result.acquisition.translation_provider} · {result.acquisition.translation_requests} request(s) · {(result.acquisition.translation_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Semantic step<strong>{result.acquisition.semantic_provider} · {result.acquisition.semantic_requests} call(s) · {(result.acquisition.semantic_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>OpenAI tokens<strong>{result.acquisition.semantic_total_tokens.toLocaleString()}</strong></span></div>{result.source_pages.length > 0 && <><div><span>Pages<strong>{result.acquisition.source_pages}</strong></span></div><div><span>Total pipeline<strong>{(result.acquisition.total_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Facts needing review<strong>{result.acquisition.critical_facts_needing_review}</strong></span></div></>}</div>
+        <div className="image-metrics"><div><ImageIcon size={18} /><span>OCR<strong>{result.acquisition.ocr_provider} · {(result.acquisition.ocr_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Translation<strong>{result.acquisition.translation_provider} · {result.acquisition.translation_requests} request(s) · {(result.acquisition.translation_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>Semantic step<strong>{result.acquisition.semantic_provider} · {result.acquisition.semantic_requests} call(s) · {(result.acquisition.semantic_latency_ms / 1000).toFixed(1)}s</strong></span></div><div><span>OpenAI tokens<strong>{result.source_ledger ? result.source_ledger.metrics.total_tokens?.toLocaleString() ?? 'Unavailable' : result.acquisition.semantic_total_tokens.toLocaleString()}</strong></span></div>{result.source_pages.length > 0 && <><div><span>Pages<strong>{result.acquisition.source_pages}</strong></span></div><div><span>Total pipeline<strong>{(result.acquisition.total_latency_ms / 1000).toFixed(1)}s</strong></span></div>{!result.source_ledger && <div><span>Facts needing review<strong>{result.acquisition.critical_facts_needing_review}</strong></span></div>}</>}</div>
         {photoTimings && <PhotoTimings timings={photoTimings} />}
         <div className="condition-tabs" role="tablist" aria-label="Notice presentation conditions">{tabOptions.map((tab) => <button id={`tab-${tab.id}`} role="tab" aria-selected={activeTab === tab.id} aria-controls={`panel-${tab.id}`} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)} key={tab.id}><span>{tab.short}</span>{tab.label}</button>)}</div>
         <div className="tab-panel" id={`panel-${activeTab}`} role="tabpanel" aria-labelledby={`tab-${activeTab}`}>
           {activeTab === 'original' && (result.source_pages.length > 0 ? <OriginalImageView result={result} provider={provider} editable={!publicMode} onUpdated={updateResult} /> : <article className="reading-panel"><div className="reading-meta"><span>Source language</span><strong>Korean</strong></div><div className="prose-output" lang="ko">{result.original_text}</div></article>)}
-          {activeTab === 'translation' && <article className="reading-panel"><div className="reading-meta"><span>Condition A</span><strong>Faithful translation</strong></div><p className="condition-description">Baseline translation preserves detail and structure without deliberate simplification.</p><div className="prose-output">{result.faithful_translation || 'The temporary translation service was unavailable. Check the English interpretation and verification gaps in the next tabs.'}</div></article>}
+          {activeTab === 'translation' && (result.source_ledger ? <SourceLedgerView ledger={result.source_ledger} onDisplayed={ledgerDisplayed} pages={result.source_pages.map((page) => ({ page_number: page.page_number, url: page.original_url }))} /> : <article className="reading-panel"><div className="reading-meta"><span>Condition A</span><strong>Faithful translation</strong></div><p className="condition-description">Baseline translation preserves detail and structure without deliberate simplification.</p><div className="prose-output">{result.faithful_translation || 'The source content is retained in this notice.'}</div></article>)}
           {activeTab === 'simplified' && <article className="reading-panel"><div className="reading-meta"><span>Condition B</span><strong>Simplified text</strong></div><p className="condition-description">Concise, structured English without visual diagrams or icons.</p><div className="prose-output simplified-output">{result.simplified_text}</div></article>}
           {activeTab === 'visual' && <VisualInstructions result={result} showEvidence={showEvidence} />}
         </div>
-        <FidelityReport report={result.fidelity} />
+        {!result.source_ledger && <FidelityReport report={result.fidelity} />}
         <div className="research-cta"><div><FlaskConical size={24} /><div><span className="eyebrow-text">Ready to evaluate</span><h3>Present one condition without revealing the others</h3><p>Research Mode records answers, confidence, and completion time on this site's server.</p></div></div><button className="primary-button" disabled={questions.length === 0} onClick={() => setView('research')}>Open Research Mode<ArrowRight size={16} /></button>{questions.length === 0 && <small>Load a synthetic demo to use its comprehension questions.</small>}</div>
       </section>}
+      {sourceLedger && result && !ledgerPending && activeTab !== 'translation' && <section className="page-shell"><SourceLedgerView ledger={sourceLedger} onDisplayed={ledgerDisplayed} pages={imagePages.map((page, index) => ({ page_number: index + 1, url: page.previewUrl, file: page.file }))} /></section>}
     </main>
     <footer className="site-footer page-shell"><div><strong>VisNotice — Version 2</strong><span>Token-efficient visual notice instructions</span></div><p>Split-pipeline prototype · Always verify against the official notice.</p></footer>
   </div>

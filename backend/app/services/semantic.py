@@ -123,7 +123,7 @@ class _SemanticNotice(NoticeData):
         schema = super().model_json_schema(*args, **kwargs)
         application_fields = {
             "source_image_id", "bounding_box", "source_page",
-            "source_language", "target_language", "template_overrides",
+            "source_language", "target_language", "template_overrides", "source_unit_ids",
         }
         for node in (schema, *schema.get("$defs", {}).values()):
             properties = node.get("properties", {})

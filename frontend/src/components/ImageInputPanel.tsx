@@ -12,6 +12,7 @@ interface Props {
   pages: ImageDraft[]
   demos: ImageDemoSummary[]
   status: ImageAnalysisStatus
+  localOcrAvailable?: boolean
   busy: boolean
   processingImages: boolean
   progressStage: number
@@ -28,9 +29,9 @@ interface Props {
   onRetryAnalysis: () => void
 }
 
-const stages = ['Browser OCR on this device', 'Server translation and semantic analysis']
+const stages = ['Browser OCR on this device', 'Source translation', 'English instructions and source coverage']
 
-export function ImageInputPanel({ pages, demos, status, busy, processingImages, progressStage, ocrCompleted, onAdd, onRemove, onMove, onAnalyze, onLoadDemo, recoveredPages, sourceCorrections = [], photoTimings, onEditRecoveredPage, onRetryAnalysis }: Props) {
+export function ImageInputPanel({ pages, demos, status, localOcrAvailable = true, busy, processingImages, progressStage, ocrCompleted, onAdd, onRemove, onMove, onAnalyze, onLoadDemo, recoveredPages, sourceCorrections = [], photoTimings, onEditRecoveredPage, onRetryAnalysis }: Props) {
   const cameraInput = useRef<HTMLInputElement>(null)
   const imageInput = useRef<HTMLInputElement>(null)
   const replaceImages = useRef(false)
@@ -71,7 +72,7 @@ export function ImageInputPanel({ pages, demos, status, busy, processingImages, 
   return <section className="image-input-panel">
     <div className="capture-intro"><div><span className="eyebrow-text">Primary input</span><h3>Photograph a Korean notice</h3><p>Analyze different notices one at a time. Combine images only when they are pages of the same notice, then check their order before analysis.</p></div><ScanLine size={38} aria-hidden="true" /></div>
     <div className={`ocr-status ${status === 'ready' ? 'available' : ''}`} role="status">
-      {status === 'ready' ? <><strong>Photos are read on your device.</strong> The Korean/English OCR model downloads on first use, which can take extra time. Photos stay in this browser; recognized text and any locally decoded QR web URLs are sent to the server for analysis. Links are never opened automatically. Check them against the original notice.</> : status === 'unavailable' ? <><strong>Photo analysis is unavailable in this browser.</strong> This browser lacks a feature needed for local OCR. Try a recent browser, paste Korean text, or upload a text-based PDF/TXT file.</> : status === 'error' ? <><strong>Photo analysis could not be checked.</strong> Refresh the page to retry. Text and synthetic notices remain available.</> : <>Checking photo analysis availability…</>}
+      {status === 'ready' ? <><strong>{localOcrAvailable ? 'Photos are read on your device.' : 'Photo recovery remains available without local OCR.'}</strong> {localOcrAvailable && 'The Korean/English OCR model downloads on first use, which can take extra time. '}Original images remain on your device. Recognized text, layout, and up to four bounded recovery crops can be sent to OpenAI through the API; a reduced page may be included when local OCR is unavailable. Recovery images are not stored on the server. Locally decoded QR links are never opened automatically.</> : status === 'unavailable' ? <><strong>Photo analysis is unavailable in this browser.</strong> This browser lacks a feature needed for local OCR. Try a recent browser, paste Korean text, or upload a text-based PDF/TXT file.</> : status === 'error' ? <><strong>Photo analysis could not be checked.</strong> Refresh the page to retry. Text and synthetic notices remain available.</> : <>Checking photo analysis availability…</>}
     </div>
     <div className="capture-actions">
       <input ref={cameraInput} hidden type="file" accept="image/*" capture="environment" onChange={(event) => { if (event.target.files) onAdd(event.target.files, 'camera_photo'); event.target.value = '' }} />

@@ -6,6 +6,17 @@ instruction choices are evaluated.
 
 ## Architecture
 
+The current browser photo UI uses `/api/translate-ledger` followed by
+`/api/analyze-ledger`, displaying translations while instructions are composed.
+The source ledger retains polygons, alternate readings and explicit source IDs.
+Up to four bounded inline JPEG/PNG recovery crops (1.5 MB encoded total) can be
+sent to OpenAI through the API; these images are not persisted. The configured
+model remains `gpt-4o-mini`. The independent image translator also uses the
+ledger translation endpoint and retains English/crop sidecars for regions that
+cannot be painted. It makes no semantic calls. Earlier endpoints below remain
+for text/PDF/administrative compatibility. See
+[source-ledger verification](SOURCE_LEDGER_VERIFICATION.md) for current evidence.
+
 - `frontend/` is built as the Vite static site.
 - `vercel.json` explicitly sets `framework: null` and the frontend output
   directory so static files are served separately from the file-based Python
@@ -66,7 +77,10 @@ report `paddleocr-local-unavailable-on-vercel` even while browser OCR works.
 The browser never receives the container token. Image-only PDFs are not yet
 handled by browser OCR on the hosted site; local Python/Docker OCR supports them.
 
-## Fidelity and latency limits
+## Legacy fidelity and latency limits
+
+The following describes text/PDF and earlier browser-OCR clients. Current photo
+ledger behavior and measured release checks are in [SOURCE_LEDGER_VERIFICATION.md](SOURCE_LEDGER_VERIFICATION.md).
 
 OCR text order can interleave columns and separate table headers from their
 values. Browser OCR therefore sends bounded text-box positions. The API

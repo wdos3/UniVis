@@ -65,11 +65,11 @@ def test_table_rows_are_not_flattened(client: TestClient) -> None:
     assert groups == [
         {
             "source_evidence": "재학생 신청: 2027년 2월 15일 09:00 ~ 2월 17일 17:00", "source_fact_ids": ["F001"], "state": "verified", "source_page": 1,
-            "source_image_id": groups[0]["source_image_id"], "bounding_box": None, "group": "Enrolled students", "application_period": "February 15–17, 2027", "details": "",
+            "source_image_id": groups[0]["source_image_id"], "source_unit_ids": [], "bounding_box": None, "group": "Enrolled students", "application_period": "February 15–17, 2027", "details": "",
         },
         {
             "source_evidence": "신입생 신청: 2027년 2월 19일 09:00 ~ 17:00", "source_fact_ids": ["F002"], "state": "verified", "source_page": 1,
-            "source_image_id": groups[1]["source_image_id"], "bounding_box": None, "group": "New students", "application_period": "February 19, 2027", "details": "",
+            "source_image_id": groups[1]["source_image_id"], "source_unit_ids": [], "bounding_box": None, "group": "New students", "application_period": "February 19, 2027", "details": "",
         },
     ]
 

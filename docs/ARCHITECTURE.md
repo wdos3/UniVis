@@ -6,6 +6,47 @@ VisNotice separates factual interpretation from presentation. AI providers retur
 
 ## Components
 
+### Current browser photo ledger
+
+`captureSourceUnits` records raw observations before the legacy text/span projection.
+Physical units retain polygons, confidence and alternate readings. `/api/translate-ledger`
+reconstructs exclusive layout blocks and repeated spatial table grids; it translates
+bounded, explicitly identified chunks with four concurrent pooled requests. Reordered,
+missing and duplicate responses are reconciled by ID. Protected literals and known
+condition/negation patterns receive deterministic checks; these checks cannot prove
+arbitrary semantic equivalence.
+
+`/api/analyze-ledger` passes the structured Korean inventory, section/column/table
+context and optional recovery crops to the configured model. Required response keys
+bind every English fragment to its physical source ID, independently of block roles.
+MyMemory output remains a progressive reading aid and fallback; it is not authority
+for the semantic request. Clear English cells and standalone numeric thresholds are
+preserved deterministically rather than accepting model substitutions.
+It makes one structured extraction request and at most one targeted repair. Application
+code validates source references, English fields and protected values. Every rejected
+or absent item receives a replacement from its source block or an English crop caption.
+The source ledger survives independently of the notice facts and legacy audit filters.
+Original readings remain distinct from candidate/vision recoveries and their provenance.
+
+`SourceLedgerView` renders grouped paragraphs, source tables and preserved image crops.
+It reconciles displayed source IDs independently of semantic references. The image
+translator paints a separate local canvas; regions that cannot be safely painted still
+appear in English sidecars with their source crops. The main UI shows translations
+while semantic instructions continue. Expected provider failures return these source
+fallbacks rather than a correction gate. Neither ID coverage nor a literal check is a
+certificate of complete or correct meaning.
+
+Recovery crop requests accept only inline JPEG/PNG, at most four crops and 1.5 MB of
+encoded image data. They are passed to OpenAI in memory and are not saved with results.
+Credentials stay server-side. The static Vite frontend/Python API packaging is unchanged.
+Ledger timings separate OCR, layout, translation, semantic work, validation and drawing;
+OpenAI usage is nullable when unavailable, with an explicit completeness flag.
+
+### Legacy text, PDF and correction pipeline
+
+The audit/filtering contract below applies to earlier clients and text/PDF/local
+Python acquisition paths. The current browser photo UI uses the ledger endpoints.
+
 Recovered phone numbers containing unreadable characters and incomplete positioned
 English-test tables are rejected before translation/semantic requests. Recovery
 errors use HTTP 422 with `code`, `message`, and page/line/text/reason corrections.
@@ -82,21 +123,18 @@ Template selection is deterministic:
 
 ### React frontend
 
-`ImageInputPanel` makes camera capture and image upload primary actions and maintains ordered multi-page previews. If semantic analysis fails after browser OCR, it displays the recognized text beside the source pages for correction and retry without another OCR pass. `OriginalImageView` presents source pages, quality warnings, QR results, and editable recovered Korean text in local administrative mode. On the hosted browser-OCR path, local object URLs show the user's source photo without uploading it. `VisualInstructions` composes reusable semantic sections, including a distinct financial-support card, and can disclose the supporting source page in a modal. Lucide icons always appear with text.
+`ImageInputPanel` makes camera capture and image upload primary actions and maintains ordered multi-page previews. The photo UI uses ledger translation followed by semantic composition. Provider failures retain the translated source view and crop sidecars. Korean correction remains an optional researcher feature. `OriginalImageView` presents the original browser-local pages; bounded recovery crops may be sent for vision and are not persisted. `VisualInstructions` composes reusable sections, including financial-support cards, timelines and checklists, and discloses source evidence on request. Lucide icons always appear with text.
 
 The same `AnalysisResult` drives the Original, Translation, Simplified, and Visual tabs. Research Mode reveals only one condition. Researcher View allows schema-level manual correction and calls the backend to validate and regenerate derived output without an AI call.
 
 ### Independent image translation prototype
 
 `ImageTranslator` is a separate single-photo mode at `#image-translate`. It reuses
-browser PaddleOCR, resolves comparable repeated crop readings and conservatively
-groups continuation lines into positioned regions. Table-like parallel cells stay
-separate. `/api/translate-image-text` accepts only region IDs and recognized text,
-rejects extra fields, bounds region/text counts and applies the public analysis
-rate limit. The existing translation adapter translates unique Korean strings
-with at most four simultaneous outbound connections. Latin-only values remain
-unchanged; expected provider failures are isolated by region. Empty or still-Korean
-responses retain the original text and report an error.
+browser PaddleOCR and the source ledger, preserving comparable repeated crop
+readings as alternatives. `/api/translate-ledger` reconstructs blocks and tables,
+then translates ID-mapped chunks. Bounded browser batching preserves oversized
+inventories and failed batches. Latin-only values remain intact. Missing or
+still-Korean English receives a crop-backed fallback rather than disappearing.
 
 Region IDs and exact source text must match before the browser draws a response.
 The renderer uses the original image's orientation and dimensions, samples local
@@ -107,6 +145,9 @@ or ambiguous overlap stays original. PNG creation and download use local canvas
 and object URLs. Replacing/exiting a photo aborts translation, rejects stale
 results and releases object URLs; repeat runs reuse OCR for that same selection.
 
+Every unit appears in the English source view, including crop sidecars for missing
+positions, translations that fail literal checks, overlaps and fitting failures.
+Display IDs are measured from rendered DOM nodes. The original file is unchanged.
 This route has no semantic provider, completeness audit, OpenAI requests,
 analysis persistence or image upload. It is a machine-translation/placement
 experiment; replacement counts do not establish accurate translation or OCR
@@ -117,12 +158,14 @@ recall. See [measured verification and limitations](IMAGE_TRANSLATION_VERIFICATI
 SQLite stores complete processed-notice snapshots and research results. For the
 local Python/Docker image API, originals and processed working images are stored
 under `data/uploads/{analysis_id}` for evidence review. Browser-OCR analyses
-store text/results but no photos. The default database file is local and can be
+store text/results but no photos or recovery crop bytes. Recovery crops are passed
+to OpenAI in memory only. An expected persistence failure does not withhold a
+completed ledger result. The default database file is local and can be
 redirected using `VISNOTICE_DB_PATH`. CSV output escapes spreadsheet-formula
 prefixes in participant IDs. The prototype does not implement automatic
 retention or deletion.
 
-## Data flow
+## Legacy text/PDF/local-image data flow
 
 ```text
 Camera photo / image pages / PDF / Korean text

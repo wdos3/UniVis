@@ -1,8 +1,28 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, ApiError } from './client'
+import { makeSourceUnit, pendingLedger } from '../ledger/sourceLedger'
 
 describe('client-side OCR analysis request', () => {
   afterEach(() => vi.unstubAllGlobals())
+
+  it('sends ledger translation with exact source IDs and spatial evidence without original image bytes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ units: [], blocks: [] }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const units = [makeSourceUnit({ page: 1, text: '지원금 100만원', order: 0, id: 'funding', box: { x: .1, y: .5, width: .4, height: .05 } })]
+    await api.translateLedger(units, 100, 12)
+    expect(fetchMock).toHaveBeenCalledWith('/api/translate-ledger', expect.objectContaining({ method: 'POST' }))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ units, ocr_latency_ms: 100, layout_latency_ms: 12 })
+  })
+
+  it('maps bounded recovery crops to source IDs in the semantic request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 'result' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const ledger = pendingLedger([makeSourceUnit({ page: 1, text: '문의 02-710-25n0', order: 0, id: 'contact' })])
+    const regions = [{ unit_ids: ['contact'], data_url: 'data:image/jpeg;base64,/9j/AA==' }]
+    await api.analyzeLedger(ledger, 'auto', 'uploaded_image', regions)
+    expect(fetchMock).toHaveBeenCalledWith('/api/analyze-ledger', expect.objectContaining({ method: 'POST' }))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ ledger, provider: 'auto', input_type: 'uploaded_image', regions })
+  })
 
   it('sends image translation as bounded text regions with cancellation and no image bytes', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ regions: [] }), { status: 200 }))

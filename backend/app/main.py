@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sqlite3
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -25,10 +26,14 @@ from app.models import (
     ImageAcquisitionReport,
     ImageDemoSummary,
     ImageQualityIssue,
+    FidelityReport,
+    LedgerAnalysisRequest,
+    LedgerTranslationRequest,
     NoticeData,
     RecoveredTextUpdate,
     ResearchResultCreate,
     SourcePage,
+    SourceLedger,
 )
 from app.services.demos import DEMOS, get_demo, match_demo
 from app.services.fidelity import calculate_fidelity, select_templates
@@ -42,6 +47,9 @@ from app.services.extraction.language_scores import (
 )
 from app.services.image_demos import IMAGE_DEMOS
 from app.services.image_translation import router as image_translation_router
+from app.services.ledger_layout import build_source_ledger
+from app.services.ledger_semantic import analyze_ledger
+from app.services.ledger_translation import translate_ledger
 from app.services.images.pdf_images import render_pdf_pages
 from app.services.images.preprocessing import ImageProcessingError, prepare_image, upload_root
 from app.services.ocr_layout import format_ocr_layout, reorder_ocr_page_columns
@@ -271,6 +279,7 @@ def health() -> dict[str, object]:
         "translation_provider": os.getenv("TRANSLATION_PROVIDER", "mymemory"),
         "ocr_provider": ocr_provider,
         "semantic_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        "photo_pipeline": "source-ledger-v1",
         "public_mode": public_mode(),
     }
 
@@ -296,6 +305,57 @@ def image_demos() -> list[ImageDemoSummary]:
 @app.post("/api/analyze", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])
 async def analyze_text(request: AnalyzeRequest) -> AnalysisResult:
     return await analyze(request)
+
+
+@app.post("/api/translate-ledger", response_model=SourceLedger, dependencies=[Depends(limit_public_analysis)])
+async def translate_source_ledger(request: LedgerTranslationRequest) -> SourceLedger:
+    ledger = build_source_ledger(request.units, ocr_ms=request.ocr_latency_ms, layout_ms=request.layout_latency_ms)
+    return await translate_ledger(ledger)
+
+
+@app.post("/api/analyze-ledger", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])
+async def analyze_source_ledger(request: LedgerAnalysisRequest) -> AnalysisResult:
+    outcome = await analyze_ledger(request.ledger, request.provider, request.regions)
+    ledger, notice = outcome.ledger, outcome.notice
+    source_text = "\n\n".join(block.source_text for block in ledger.blocks)
+    translation = "\n\n".join(block.english for block in ledger.blocks)
+    pages = [SourcePage(
+        id=next(unit.image_id for unit in ledger.units if unit.page_number == page),
+        page_number=page, filename=f"Browser photo {page}", media_type="image/browser-local",
+        original_url="", processed_url="", width=1, height=1,
+        readable=any(unit.source_text.strip() for unit in ledger.units if unit.page_number == page),
+    ) for page in sorted({unit.page_number for unit in ledger.units})]
+    metrics = ledger.metrics
+    acquisition = ImageAcquisitionReport(
+        input_type=request.input_type, source_pages=len(pages),
+        text_extraction_status="available" if all(page.readable for page in pages) else "partial",
+        ocr_provider="browser-ocr-kor-eng", translation_provider="source-ledger",
+        semantic_provider="openai-semantic" if metrics.semantic_requests else "source-ledger-fallback",
+        translation_requests=metrics.translation_requests, semantic_requests=metrics.semantic_requests,
+        semantic_input_tokens=metrics.input_tokens or 0, semantic_output_tokens=metrics.output_tokens or 0,
+        semantic_total_tokens=metrics.total_tokens or 0, ocr_latency_ms=metrics.ocr_ms,
+        translation_latency_ms=metrics.translation_ms, semantic_latency_ms=metrics.semantic_ms,
+        extraction_latency_ms=metrics.semantic_ms, coverage_latency_ms=metrics.validation_ms,
+        total_latency_ms=metrics.ocr_ms + metrics.layout_ms + metrics.translation_ms + metrics.semantic_ms + metrics.validation_ms,
+        english_coverage_status="not_audited", metrics_complete=metrics.usage_complete,
+    )
+    result = make_result(source_text, translation, notice, acquisition.semantic_provider,
+                         recovered_text=source_text, source_pages=pages, acquisition=acquisition)
+    # Legacy fidelity counts only model-created facts. The independent ledger
+    # carries physical inventory and display reconciliation, never accuracy %.
+    result.source_ledger = ledger
+    result.fidelity = FidelityReport(
+        checks=["Source-unit inventory and translation mappings retained independently of semantic output.",
+                "Display coverage is reconciled by the browser after rendering; it is not a meaning audit."],
+        warnings=ledger.coverage.protected_value_gaps,
+    )
+    try:
+        save_notice(result)
+    except (sqlite3.Error, OSError):
+        logger.exception("ledger_result_persistence_failed notice_id=%s", result.id)
+    logger.info("ledger_analysis_completed notice_id=%s units=%d fallback_units=%d semantic_requests=%d semantic_tokens=%s",
+                result.id, len(ledger.units), len(ledger.coverage.fallback_unit_ids), metrics.semantic_requests, metrics.total_tokens)
+    return result
 
 
 @app.post("/api/analyze-client-ocr", response_model=AnalysisResult, dependencies=[Depends(limit_public_analysis)])

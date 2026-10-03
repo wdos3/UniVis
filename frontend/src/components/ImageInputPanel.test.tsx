@@ -22,8 +22,8 @@ describe('ImageInputPanel', () => {
     const { container } = render(<ImageInputPanel {...correctionProps} pages={[]} demos={[]} status="ready" busy={false} processingImages={false} progressStage={0} ocrCompleted={0} onAdd={vi.fn()} onRemove={vi.fn()} onMove={vi.fn()} onAnalyze={vi.fn()} onLoadDemo={vi.fn()} />)
     expect(screen.getByText('Take a Photo')).toBeInTheDocument()
     expect(screen.getByText('Upload Image')).toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('locally decoded QR web URLs are sent to the server for analysis')
-    expect(screen.getByRole('status')).toHaveTextContent('Links are never opened automatically')
+    expect(screen.getByRole('status')).toHaveTextContent('up to four bounded recovery crops can be sent to OpenAI')
+    expect(screen.getByRole('status')).toHaveTextContent('Locally decoded QR links are never opened automatically')
     expect(container.querySelector('input[capture="environment"]')).toHaveAttribute('accept', 'image/*')
   })
 

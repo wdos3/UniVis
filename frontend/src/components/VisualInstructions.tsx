@@ -113,7 +113,7 @@ export function VisualInstructions({ result, showEvidence = false, compact = fal
         {n.links.length > 0 && <div className="visual-card info-card"><CardTitle icon={Globe2}>Online</CardTitle><FactList items={n.links} showEvidence={showEvidence} onViewImage={setEvidenceItem} /></div>}
       </section>}
 
-      {(n.ambiguities.length > 0 || n.unverified_items.length > 0) && <section className="review-banner" role="alert">
+      {!result.source_ledger && (n.ambiguities.length > 0 || n.unverified_items.length > 0) && <section className="review-banner" role="alert">
         <AlertTriangle size={20} aria-hidden="true" /><div><strong>Details needing verification</strong><ul>{[...n.ambiguities, ...n.unverified_items].map((item) => <li key={item}>{item}</li>)}</ul></div>
       </section>}
       <footer className="visual-footer">Check the official university notice before acting. Automated interpretation may contain errors.</footer>

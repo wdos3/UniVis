@@ -39,4 +39,11 @@ describe('PhotoTimings', () => {
     expect(screen.getByText('Measured photo processing · 2.0s')).toBeInTheDocument()
     expect(screen.queryByText('QR preparation and scanning (parallel)')).not.toBeInTheDocument()
   })
+
+  it('reports translation request wait as a component of the total, including network', () => {
+    render(<PhotoTimings timings={{ ...timings, translationRequestMs: 600 }} />)
+    expect(screen.getByText('Measured photo processing · 2.0s')).toBeInTheDocument()
+    expect(screen.getByText('Translation request wait, including network')).toBeInTheDocument()
+    expect(screen.getByText(/Translation request wait is part/)).toHaveTextContent('sum work across concurrently processed batches')
+  })
 })

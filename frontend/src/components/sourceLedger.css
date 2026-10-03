@@ -1,0 +1,19 @@
+.source-ledger-view { margin: 1.5rem 0; }
+.source-ledger-view h2 { margin-bottom: .5rem; }
+.ledger-explanation, .ledger-coverage { color: #506171; font-size: .88rem; }
+.ledger-block { padding: .65rem 1rem; margin: .4rem 0; border-left: 3px solid #d7e4ec; background: #f8fafc; }
+.ledger-block--heading { font-size: 1.15rem; font-weight: 650; }
+.ledger-block--condition { border-color: #dfa848; }
+.ledger-unit > p { white-space: pre-wrap; margin: .3rem 0 .6rem; overflow-wrap: anywhere; }
+.ledger-unit details { font-size: .8rem; color: #526675; margin-bottom: .5rem; }
+.ledger-unit summary { cursor: pointer; }
+.ledger-unit details p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ledger-crop { margin: .4rem 0; max-width: 650px; }
+.ledger-crop > div { position: relative; overflow: hidden; width: 100%; background: #edf2f5; }
+.ledger-crop img { position: absolute; max-width: none; height: auto; }
+.ledger-crop figcaption { font-size: .7rem; color: #64748b; }
+.ledger-table-wrap { width: 100%; overflow-x: auto; margin: 1rem 0; }
+.ledger-table-wrap table { border-collapse: collapse; width: 100%; min-width: 450px; }
+.ledger-table-wrap td { border: 1px solid #d2dce4; padding: .7rem; vertical-align: top; }
+.ledger-table-wrap caption { text-align: left; padding: .5rem 0; font-weight: 600; }
+.ledger-coverage { margin-top: 1rem; }

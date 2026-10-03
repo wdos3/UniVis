@@ -52,8 +52,8 @@ describe('App browser OCR', () => {
     vi.mocked(api.health).mockResolvedValue({ status: 'ok', openai_configured: false, default_provider: 'mock', ocr_provider: 'paddleocr-local-unavailable-on-vercel', public_mode: true })
     render(<App />)
 
-    expect(await screen.findByText('Photo analysis is unavailable in this browser.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Take a Photo/i })).toBeDisabled()
+    expect(await screen.findByText('Photo recovery remains available without local OCR.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Take a Photo/i })).toBeEnabled()
     expect(screen.getByRole('button', { name: /Upload text-based PDF or TXT/i })).toBeEnabled()
     expect(await screen.findByRole('button', { name: /Synthetic notice/ })).toBeEnabled()
     expect(screen.queryByRole('button', { name: 'Researcher View' })).not.toBeInTheDocument()

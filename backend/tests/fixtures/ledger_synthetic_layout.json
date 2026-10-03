@@ -1,0 +1,36 @@
+{
+  "description": "Synthetic mechanics fixture: two columns, score table, wrapped prohibition, two amounts, date/time, contacts and noisy seal. Not empirical OCR evidence.",
+  "ledger": {
+    "units": [
+      {"id":"left-heading","page_number":1,"image_id":"synthetic-page","order":0,"source_text":"지원 자격","box":{"x":0.05,"y":0.05,"width":0.38,"height":0.04},"block_id":"left-heading-block","section_id":"eligibility"},
+      {"id":"right-heading","page_number":1,"image_id":"synthetic-page","order":1,"source_text":"지원금 및 일정","box":{"x":0.55,"y":0.05,"width":0.39,"height":0.04},"block_id":"right-heading-block","section_id":"funding"},
+      {"id":"toeic-label","page_number":1,"image_id":"synthetic-page","order":2,"source_text":"TOEIC","box":{"x":0.06,"y":0.14,"width":0.17,"height":0.03},"block_id":"toeic-label-block","section_id":"eligibility","table_id":"scores","table_row":0,"table_column":0},
+      {"id":"toeic-score","page_number":1,"image_id":"synthetic-page","order":3,"source_text":"800 이상","box":{"x":0.26,"y":0.14,"width":0.17,"height":0.03},"block_id":"toeic-score-block","section_id":"eligibility","table_id":"scores","table_row":0,"table_column":1},
+      {"id":"teps-label","page_number":1,"image_id":"synthetic-page","order":4,"source_text":"TEPS","box":{"x":0.06,"y":0.2,"width":0.17,"height":0.03},"block_id":"teps-label-block","section_id":"eligibility","table_id":"scores","table_row":1,"table_column":0},
+      {"id":"teps-score","page_number":1,"image_id":"synthetic-page","order":5,"source_text":"309 이상","box":{"x":0.26,"y":0.2,"width":0.17,"height":0.03},"block_id":"teps-score-block","section_id":"eligibility","table_id":"scores","table_row":1,"table_column":1},
+      {"id":"research-fund","page_number":1,"image_id":"synthetic-page","order":6,"source_text":"연구비: 1인당 최대 20만원","box":{"x":0.55,"y":0.14,"width":0.39,"height":0.04},"block_id":"research-fund-block","section_id":"funding"},
+      {"id":"activity-fund","page_number":1,"image_id":"synthetic-page","order":7,"source_text":"활동비: 1인당 10만원, 장학금 지급","box":{"x":0.55,"y":0.21,"width":0.39,"height":0.04},"block_id":"activity-fund-block","section_id":"funding"},
+      {"id":"condition-first","page_number":1,"image_id":"synthetic-page","order":8,"source_text":"휴학생은 참여할 수 있으나","box":{"x":0.06,"y":0.29,"width":0.37,"height":0.03},"block_id":"wrapped-condition","section_id":"eligibility"},
+      {"id":"condition-second","page_number":1,"image_id":"synthetic-page","order":9,"source_text":"연구비 및 활동비 지원 대상에서 제외","box":{"x":0.06,"y":0.33,"width":0.38,"height":0.04},"block_id":"wrapped-condition","section_id":"eligibility"},
+      {"id":"duplicate-ban","page_number":1,"image_id":"synthetic-page","order":10,"source_text":"중복 지원 불가. 2~5명 팀 구성","box":{"x":0.06,"y":0.42,"width":0.38,"height":0.04},"block_id":"duplicate-ban-block","section_id":"eligibility"},
+      {"id":"deadline","page_number":1,"image_id":"synthetic-page","order":11,"source_text":"신청 마감: 2026.10.20 오후 6시","box":{"x":0.55,"y":0.3,"width":0.39,"height":0.04},"block_id":"deadline-block","section_id":"funding"},
+      {"id":"contacts","page_number":1,"image_id":"synthetic-page","order":12,"source_text":"문의: 02-123-4567, office@example.org, https://example.org/apply","box":{"x":0.55,"y":0.39,"width":0.39,"height":0.08},"block_id":"contacts-block","section_id":"funding"},
+      {"id":"seal-noise","page_number":1,"image_id":"synthetic-page","order":13,"source_text":"ㄱㅅ ㅁㄷ 2026","box":{"x":0.75,"y":0.55,"width":0.09,"height":0.04},"confidence":0.21,"alternatives":[{"text":"ㄱㅅ ㅁㄷ 2028","confidence":0.18,"pass_name":"region-upscale"}],"block_id":"seal-block","section_id":"caption"}
+    ],
+    "blocks": [
+      {"id":"left-heading-block","unit_ids":["left-heading"],"kind":"heading","section_id":"eligibility"},
+      {"id":"right-heading-block","unit_ids":["right-heading"],"kind":"heading","section_id":"funding"},
+      {"id":"toeic-label-block","unit_ids":["toeic-label"],"kind":"table_cell","section_id":"eligibility","table_id":"scores","table_row":0,"table_column":0},
+      {"id":"toeic-score-block","unit_ids":["toeic-score"],"kind":"table_cell","section_id":"eligibility","table_id":"scores","table_row":0,"table_column":1},
+      {"id":"teps-label-block","unit_ids":["teps-label"],"kind":"table_cell","section_id":"eligibility","table_id":"scores","table_row":1,"table_column":0},
+      {"id":"teps-score-block","unit_ids":["teps-score"],"kind":"table_cell","section_id":"eligibility","table_id":"scores","table_row":1,"table_column":1},
+      {"id":"research-fund-block","unit_ids":["research-fund"],"kind":"paragraph","section_id":"funding"},
+      {"id":"activity-fund-block","unit_ids":["activity-fund"],"kind":"paragraph","section_id":"funding"},
+      {"id":"wrapped-condition","unit_ids":["condition-first","condition-second"],"kind":"condition","section_id":"eligibility"},
+      {"id":"duplicate-ban-block","unit_ids":["duplicate-ban"],"kind":"condition","section_id":"eligibility"},
+      {"id":"deadline-block","unit_ids":["deadline"],"kind":"paragraph","section_id":"funding"},
+      {"id":"contacts-block","unit_ids":["contacts"],"kind":"paragraph","section_id":"funding"},
+      {"id":"seal-block","unit_ids":["seal-noise"],"kind":"caption","section_id":"caption"}
+    ]
+  }
+}

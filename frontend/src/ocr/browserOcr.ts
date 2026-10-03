@@ -2,7 +2,8 @@
 
 import type { OcrResult, OcrResultItem, PaddleOCR } from '@paddleocr/paddleocr-js'
 import type { QRCode } from 'jsqr'
-import type { BoundingBox, OcrSpan } from '../types'
+import type { BoundingBox, OcrSpan, SourceUnit } from '../types'
+import { captureSourceUnits, makeSourceUnit, mergeSourceObservations } from '../ledger/sourceLedger'
 
 type OcrEngine = Awaited<ReturnType<typeof PaddleOCR.create>>
 type QrDecoder = typeof import('jsqr').default
@@ -60,6 +61,7 @@ export interface BrowserOcrResult extends BrowserOcrMetrics {
 export interface BrowserOcrPage {
   text: string
   spans: OcrSpan[]
+  source_units?: SourceUnit[]
 }
 
 let enginePromise: Promise<OcrEngine> | undefined
@@ -107,7 +109,7 @@ async function getEngine(): Promise<OcrEngine> {
     }).catch((error: unknown) => {
       enginePromise = undefined
       engineReady = false
-      throw new Error('Korean OCR could not load its local models. Check your connection and try again.', { cause: error })
+      throw new Error('Korean OCR could not load its local models.', { cause: error })
     })
   }
   return enginePromise
@@ -126,7 +128,7 @@ function spanBox(item: OcrResultItem, image: OcrResult['image']): BoundingBox | 
   return { x, y, width: right - x, height: bottom - y }
 }
 
-function pageText(result: OcrResult): BrowserOcrPage {
+function pageText(result: OcrResult, page = 1, pass = 'initial'): BrowserOcrPage {
   const lines: string[] = []
   const spans: BrowserOcrPage['spans'] = []
   for (const item of result.items) {
@@ -139,7 +141,15 @@ function pageText(result: OcrResult): BrowserOcrPage {
       spans.push({ text, box, ...(confidence !== undefined ? { confidence } : {}) })
     }
   }
-  return { text: lines.join('\n'), spans }
+  return { text: lines.join('\n'), spans, source_units: captureSourceUnits(result, page, pass) }
+}
+
+function preservedPage(page: number): BrowserOcrPage {
+  const unit = makeSourceUnit({ page, text: '', order: 0, box: { x: 0, y: 0, width: 1, height: 1 },
+    id: `page-${page}-preserved-image`, pass: 'image_fallback' })
+  unit.translation_status = 'source_crop'
+  unit.english = 'The source page image is preserved; local OCR did not produce a reading.'
+  return { text: '', spans: [], source_units: [unit] }
 }
 
 function sameTextRegion(left: OcrSpan, right: OcrSpan): boolean {
@@ -172,7 +182,8 @@ function addDetailText(page: BrowserOcrPage, detail: BrowserOcrPage): BrowserOcr
     additions.push(text)
     if (span) spans.push(span)
   }
-  return { text: [page.text, ...additions].filter(Boolean).join('\n'), spans }
+  return { text: [page.text, ...additions].filter(Boolean).join('\n'), spans,
+    source_units: mergeSourceObservations(page.source_units ?? [], detail.source_units ?? []) }
 }
 
 function detailRegion(result: OcrResult): BoundingBox | null {
@@ -398,7 +409,10 @@ export async function recognizeImages(
   onProgress?: (completed: number, total: number) => void,
 ): Promise<BrowserOcrResult> {
   if (!isBrowserOcrSupported()) {
-    throw new Error('This browser cannot run local OCR. Use a recent browser with WebAssembly and image bitmap support.')
+    onProgress?.(files.length, files.length)
+    return { pages: files.map((_, index) => preservedPage(index + 1)), latencyMs: 0, initializationMs: 0, inferenceMs: 0,
+      modelState: 'initialized', detectionMs: null, recognitionMs: null, qrMs: null, detailPasses: 0,
+      recoveryWarnings: ['Local OCR is unavailable in this browser. Preserved page images remain available for automatic recovery.'] }
   }
   if (files.length === 0) {
     throw new Error('Choose at least one image to analyze.')
@@ -410,7 +424,13 @@ export async function recognizeImages(
   const qrDecoderPromise: Promise<QrDecoder | null> = import('jsqr')
     .then(({ default: decoder }) => decoder)
     .catch(() => null)
-  const engine = await getEngine()
+  let engine: OcrEngine | null = null
+  let initializationWarning = ''
+  try {
+    engine = await getEngine()
+  } catch (problem) {
+    initializationWarning = problem instanceof Error ? problem.message : 'Local OCR initialization ended.'
+  }
   const initializedAt = performance.now()
   const pages: BrowserOcrPage[] = []
   let remainingSpans = 600
@@ -419,6 +439,7 @@ export async function recognizeImages(
   let qrMs: number | null = 0
   let detailPasses = 0
   const recoveryWarnings: string[] = []
+  if (initializationWarning) recoveryWarnings.push(`${initializationWarning} The original page is retained for automatic region recovery.`)
 
   function recordMetrics(result: OcrResult) {
     detectionMs = detectionMs !== null && Number.isFinite(result.metrics?.detMs) && result.metrics.detMs >= 0
@@ -428,6 +449,12 @@ export async function recognizeImages(
   }
 
   for (const [index, file] of files.entries()) {
+    if (!engine) {
+      pages.push(preservedPage(index + 1))
+      detectionMs = null; recognitionMs = null
+      onProgress?.(index + 1, files.length)
+      continue
+    }
     let result: OcrResult[]
     const qrController = new AbortController()
     const qrStartedAt = performance.now()
@@ -444,24 +471,36 @@ export async function recognizeImages(
       })
     } catch (error) {
       qrController.abort()
-      throw new Error(`Could not read image ${index + 1}. Use a JPEG, PNG, or WebP image supported by this browser.`, { cause: error })
+      recoveryWarnings.push(`Page ${index + 1}: local OCR ended (${error instanceof Error ? error.message : 'image decoding failure'}). Its source image is retained for automatic recovery.`)
+      pages.push(preservedPage(index + 1))
+      detectionMs = null; recognitionMs = null
+      onProgress?.(index + 1, files.length)
+      continue
     }
     if (result.length !== 1) {
       qrController.abort()
-      throw new Error(`OCR returned ${result.length} pages for image ${index + 1}; expected one.`)
+      recoveryWarnings.push(`Page ${index + 1}: OCR returned an unexpected page count. The original page remains available for automatic recovery.`)
+      pages.push(preservedPage(index + 1))
+      detectionMs = null; recognitionMs = null
+      onProgress?.(index + 1, files.length)
+      continue
     }
-    let page = pageText(result[0])
+    let page = pageText(result[0], index + 1)
+    if (!page.source_units?.length) {
+      page = preservedPage(index + 1)
+      recoveryWarnings.push(`Page ${index + 1}: no text was recognized locally. Automatic recovery will use the preserved page image.`)
+    }
     recordMetrics(result[0])
     for (const region of detailRegions(result[0])) {
       try {
         const detail = await recognizeDetail(file, result[0], engine, region)
         detailPasses += 1
         recordMetrics(detail)
-        page = addDetailText(page, pageText(detail))
+        page = addDetailText(page, pageText(detail, index + 1, `detail-${detailPasses}`))
       } catch {
         const location = region.y === BOTTOM_EDGE_REGION_START && region.height === 1 - BOTTOM_EDGE_REGION_START
           ? 'the lower edge' : 'a small or uncertain text region'
-        recoveryWarnings.push(`Page ${index + 1}: ${location} could not be checked. Some details may be missing; upload a clearer photo or a close-up of this area.`)
+        recoveryWarnings.push(`Page ${index + 1}: ${location} is retained as source evidence after the additional OCR attempt ended.`)
       }
     }
     const qr = await qrUrlsWithoutDelayingOcr(qrUrlsPromise, qrController)
@@ -474,11 +513,16 @@ export async function recognizeImages(
         const qrText = `Decoded QR code URL (not opened): ${url}`
         page.text = page.text ? `${page.text}\n${qrText}` : qrText
         if (qrText.length <= 500) page.spans.push({ text: qrText, box })
+        if (page.source_units) {
+          const unit = makeSourceUnit({ page: index + 1, text: url, box, order: page.source_units.length, pass: 'qr' })
+          page.source_units.push({ ...unit, english: `Decoded QR link (not opened): ${url}`, translation_provider: 'local',
+            translation_status: 'literal', translation_source_ids: [unit.id] })
+        }
       }
     }
     const spans = page.spans.slice(0, Math.min(250, remainingSpans))
     remainingSpans -= spans.length
-    pages.push({ text: page.text, spans })
+    pages.push({ text: page.text, spans, source_units: page.source_units })
     onProgress?.(index + 1, files.length)
   }
 

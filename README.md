@@ -4,9 +4,13 @@ Version 2 separates the notice pipeline into three replaceable portions:
 
 1. PaddleOCR with the Korean PP-OCRv5 model recovers Korean text—locally in Python/Docker, or in the visitor's browser on the hosted site;
 2. MyMemory provides temporary no-key translation (or a configured LibreTranslate instance can replace it);
-3. OpenAI extracts typed notice facts from the Korean source and translation, then checks the English output for omitted source details. React renders the result deterministically.
+3. OpenAI extracts typed English instructions from the Korean source ledger, with bounded recovery crops where useful. React renders the result deterministically.
 
-An analysis can make several OpenAI calls: initial structured extraction, English-field repair when needed, a source-line completeness audit, possibly a targeted audit retry, and a bounded final English support check for photos. Photo extraction assigns fact IDs locally from exact quotations and interprets Korean directly; MyMemory remains a separate baseline. Grounded photo candidates are retained internally for final review even when an earlier audit cannot certify them. The review checks each English claim and the complete meaning of each recovered source unit; uncertain candidates are withheld. The response records stage timings, request counts, and available token usage. Version 1 remains unchanged in `../visnotice` apart from its explicit Version 1 branding.
+The browser photo path now preserves a source ledger before flattening or filtering OCR: physical IDs, polygons, alternate readings, blocks, sections, and table cells remain independent of generated facts. Translation chunks have explicit IDs and must reconcile to their source groups. The translation view appears before semantic instructions. One structured semantic request is followed by at most one repair for specific missing or rejected source IDs. Rejected prose receives a source-linked replacement or crop fallback; it cannot erase the inventory. The configured semantic model remains `gpt-4o-mini`.
+
+Original images remain on the device. Up to four bounded recovery crops (including a reduced page when browser OCR is unavailable) may be sent to OpenAI through the Python API, in memory only. Crop images are absent from stored results. Image translation alone uses no OpenAI calls. Source/display counts establish retention, **not** correct comprehension or recovery of text that OCR missed. See [ledger verification](docs/SOURCE_LEDGER_VERIFICATION.md) for measured results and limits. Version 1 and `main` remain separate.
+
+Text, PDF, administrative correction, and older browser-OCR clients retain the earlier multi-call audit contract. The sections below describe both paths where indicated.
 
 Non-mock photo extraction runs alongside the independent baseline translation.
 Targeted photo repairs can quote exact nearby source context to retain
@@ -14,14 +18,14 @@ heading/continuation relationships. Explicit printed acronym expansions can be
 restored from the field's own quotation; no expansion is inferred from memory.
 
 The separate **Image translation** prototype reads text locally, translates
-positioned regions with MyMemory, and draws English back into the original photo.
+source ledger blocks with MyMemory, and draws English back into a copy of the photo.
 Open [the image translator](https://univis-v2-prototype.vercel.app/#image-translate)
 or select **Image translation** in the workspace. It does not call OpenAI or run
 the notice interpretation/audit pipeline. Photos and exported PNGs stay in the
 browser; only recognized text is sent for translation. The result includes
 original/translated comparison, a PNG download, per-region source/English text,
-replacement counts and stage timings. Failed translations and unreadable fits
-retain original pixels. Counts measure placement rather than linguistic accuracy
+replacement counts, crop sidecars, and stage timings. Failed translations and unreadable fits
+retain original pixels and source-linked English outside the overlay. Counts measure placement rather than linguistic accuracy
 or text OCR missed. See [prototype verification](docs/IMAGE_TRANSLATION_VERIFICATION.md).
 
 **Visualizing Korean University Notices for International Students**
@@ -40,14 +44,14 @@ It is designed to test whether visualization helps international students identi
 - ordered same-notice image pages, removal/reordering, and a separate replacement upload for testing another notice;
 - EXIF correction, conservative enhancement, quality screening, QR detection, and image-PDF rendering;
 - PaddleOCR PP-OCRv5 Korean recognition for photographs and image-only PDFs in the local Python/Docker runtime;
-- browser-based PaddleOCR for camera and image uploads on the hosted site, with recognized text, bounded text positions, and any locally decoded QR web URLs sent to the application API rather than photo bytes;
+- browser-based PaddleOCR for camera and image uploads, retaining original observations and alternate readings before legacy span limits; bounded difficult-region crops can accompany automatic recovery;
 - conservative column-aware ordering for browser OCR when positioned text clearly forms two side-by-side sections;
 - local best-effort QR URL decoding that never opens links automatically;
 - selectable MyMemory or LibreTranslate adapter plus mock translation for demos;
 - separate text-in-image translation with local canvas rendering and PNG export;
 - translation chunking that keeps OCR paragraph/column boundaries and whole lines where the provider's byte limit permits;
 - strict Pydantic intermediate representation—models never generate React or HTML;
-- English-language field repair and source-line auditing with bounded retries; photo mode withholds uncertain claims and shows supported facts with explicit English verification gaps;
+- a progressive photo ledger with deterministic value checks, targeted semantic repairs and source-linked fallback content; the legacy text/audit path remains available;
 - recorded OCR, translation, semantic, and total latency plus aggregate semantic request/token counts;
 - separate semantic extraction, English repair, and completeness-audit timings; device-side model preparation/detection/recognition and latest server-request timing for photos;
 - adaptive browser-local recovery for small or uncertain text, plus a lower-edge check on tall photos (at most two additional crops), retaining conflicting readings;
@@ -55,7 +59,7 @@ It is designed to test whether visualization helps international students identi
 - deterministic visual-template selection;
 - five grounded text demos and seven generated image fixtures across six photo scenarios;
 - original-photo display, recovered Korean text correction and retry after a failed photo analysis, and image-backed evidence;
-- actionable page/text correction requests for unreadable contacts, unresolved source lines, and incomplete or ambiguous English-test tables;
+- automatic photo recovery and source crops without requiring Korean correction; manual researcher editing remains optional;
 - manual researcher correction and regeneration without another AI call;
 - research sessions with isolated A/B/C conditions, questions, elapsed time, confidence, and local SQLite storage;
 - CSV study-data export with comprehension accuracy and critical-information miss rate;
@@ -114,8 +118,9 @@ the Vercel project environment; never commit `.env` or secret values. The
 local runtime still uses PaddleOCR, but Vercel intentionally omits its large
 native packages because they exceed Vercel's function bundle limit. On the
 hosted UI, camera and image files are recognized by PaddleOCR in the browser;
-the API receives ordered OCR text, not photo bytes. This requires a capable
-browser and a first-load download of the OCR models. The local Python/Docker
+the API receives the source-text ledger and may receive bounded recovery crops.
+Local OCR needs a capable browser and a first-load download of its models; reduced
+page recovery remains available when OCR cannot run. The local Python/Docker
 image and image-only PDF path remains available. A separate OCR container may
 still be configured with `PADDLEOCR_SERVICE_URL` and its token, but is not
 required for hosted photo input. Vercel's temporary function filesystem also
@@ -165,7 +170,7 @@ With no key, the app starts in mock mode and explains that arbitrary real notice
 4. For image input, inspect original pages and OCR-recovered Korean text. Local Python/Docker image analysis also reports quality warnings and QR results; the hosted browser route attempts QR URL decoding locally.
 5. Inspect Translation, Simplified Text, and Visual Instructions.
 6. Turn on **Show source evidence** to compare English items with Korean phrases, fact IDs, and source pages.
-7. Photo recovery and audit retries run automatically. The app opens English simplified text first. A **Partial interpretation** status and English source gaps identify withheld details. **Retry English interpretation** reuses the recognized text and positions without repeating OCR or requiring Korean transcription. Source editing is optional; local **Researcher View** also supports structured-data/template corrections.
+7. Photo recovery and targeted semantic repair run automatically. The source translation appears while instructions are prepared. Simplified Text opens when ready, and the complete source view remains below it with English and crops for difficult regions. Source editing is optional; local **Researcher View** also supports structured-data/template corrections. Older clients retain their partial-result retry controls.
 8. Use **Print / Save PDF** for a clean student-facing export.
 
 Image-only PDFs are rendered and processed by local Python/Docker OCR; the hosted
@@ -259,4 +264,4 @@ visnotice-v2/
 
 ## Safety and limitations
 
-Generated output can be wrong and must not replace an official university notice. OCR may misread photographs, free machine translation may mistranslate administrative language, and even a schema-valid semantic analysis may omit or misclassify facts. The completeness audit compares recovered source lines with the English digest and rejects results it cannot confidently account for, but it cannot detect text OCR never recovered or prove the English meaning is correct. Quality detection is heuristic and icons can differ culturally. The hosted camera/image path keeps photo bytes in the browser and sends recognized text, positions, and any decoded QR URLs to the application API. The local Python/Docker image path still uploads and stores originals for evidence review. Neither path sends images to OpenAI. Extracted text is sent to the configured translation service; Korean source text and its translation are sent to OpenAI for analysis, with follow-up checks when needed. These calls add cost and latency; the 10–15 second end-to-end target is not yet met. The prototype has no retention scheduler. It stores processed notices and study responses in SQLite and does not collect account credentials, names, or participant email addresses. Do not submit private notices to the public deployment.
+Generated output can be wrong and must not replace an official university notice. OCR may misread photographs, free machine translation may mistranslate administrative language, and even a schema-valid semantic analysis may omit or misclassify facts. The photo ledger preserves recovered source units independently of semantic acceptance; source/display counts do not prove complete comprehension or recover text OCR missed. The older text/PDF audit may reject unresolved results. Original hosted photos stay in the browser. Recognized text, layout, and decoded QR URLs go to the application API; up to four bounded recovery crops, including a reduced page when local OCR is unavailable, may go to OpenAI through that API. Recovery image bytes are not stored. The local Python/Docker image path still uploads and stores originals for evidence review. Extracted text goes to the configured translation service, and structured Korean source goes to OpenAI for analysis. These calls add cost and latency; the 10–15 second end-to-end target is not met. The prototype has no retention scheduler. It stores processed notice text and study responses in SQLite and does not collect account credentials or participant email addresses. Do not submit private notices to the public deployment.

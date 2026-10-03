@@ -32,7 +32,9 @@ describe('browser OCR', () => {
     expect(isBrowserOcrSupported()).toBe(true)
     vi.stubGlobal('createImageBitmap', undefined)
     expect(isBrowserOcrSupported()).toBe(false)
-    await expect(recognizeImages([new File(['x'], 'notice.png')])).rejects.toThrow('cannot run local OCR')
+    const fallback = await recognizeImages([new File(['x'], 'notice.png')])
+    expect(fallback.pages[0].source_units?.[0].translation_status).toBe('source_crop')
+    expect(fallback.recoveryWarnings[0]).toContain('Local OCR is unavailable')
   })
 
   it('uses local Korean and detection models and preserves page order', async () => {
@@ -59,7 +61,7 @@ describe('browser OCR', () => {
       'wasmPaths', new URL('/ort/', window.location.origin).href,
     )
     expect(predict).toHaveBeenCalledTimes(2)
-    expect(result.pages).toEqual([{ text: '모집 대상\n2026년', spans: [] }, { text: '신청 기간', spans: [] }])
+    expect(result.pages.map(({ text, spans }) => ({ text, spans }))).toEqual([{ text: '모집 대상\n2026년', spans: [] }, { text: '신청 기간', spans: [] }])
     expect(result.latencyMs).toBeGreaterThanOrEqual(0)
     expect(progress.mock.calls).toEqual([[0, 2], [1, 2], [2, 2]])
   })
@@ -140,8 +142,8 @@ describe('browser OCR', () => {
     const result = await recognizeImages([new File(['x'], 'notice.png')])
     expect(result.pages[0].text).toBe('신청 기간')
     expect(result.recoveryWarnings).toEqual([
-      expect.stringContaining('Page 1: a small or uncertain text region could not be checked'),
-      expect.stringContaining('Page 1: the lower edge could not be checked'),
+      expect.stringContaining('Page 1: a small or uncertain text region is retained as source evidence'),
+      expect.stringContaining('Page 1: the lower edge is retained as source evidence'),
     ])
     expect(predict).toHaveBeenCalledOnce()
   })
@@ -294,7 +296,7 @@ describe('browser OCR', () => {
     const result = await recognizeImages([new File(['image'], 'tall.png')])
     expect(result.pages[0].text).toBe('작은 글자\n문의 02-123-4567')
     expect(result.detailPasses).toBe(1)
-    expect(result.recoveryWarnings).toEqual([expect.stringContaining('a small or uncertain text region could not be checked')])
+    expect(result.recoveryWarnings).toEqual([expect.stringContaining('a small or uncertain text region is retained as source evidence')])
     expect(predict).toHaveBeenCalledTimes(2)
   })
 
@@ -369,6 +371,10 @@ describe('browser OCR', () => {
     expect(result.pages[0].spans[1].box.x).toBeCloseTo(50 / 300)
     expect(result.pages[0].spans[1].box.y).toBeCloseTo(50 / 400)
     expect(result.pages[0].spans[2].box.x).toBeCloseTo(150 / 300)
+    expect(result.pages[0].source_units?.slice(1).map((unit) => unit.source_text)).toEqual([
+      'https://m.site.naver.com/2eoT9', 'https://splus.sogang.ac.kr/ko/module/eco/program/view/443',
+    ])
+    expect(result.pages[0].source_units?.[1].english).toBe('Decoded QR link (not opened): https://m.site.naver.com/2eoT9')
     expect(result.pages[0].text.split('\n')).toHaveLength(result.pages[0].spans.length)
     expect(createBitmap).toHaveBeenCalledWith(file, { imageOrientation: 'from-image' })
     expect(drawImage).toHaveBeenCalledTimes(1)
@@ -560,7 +566,7 @@ describe('browser OCR', () => {
 
     const result = await recognizeImages([new File(['x'], 'blank.png'), new File(['y'], 'another-blank.png')], progress)
 
-    expect(result.pages).toEqual([{ text: '', spans: [] }, { text: '', spans: [] }])
+    expect(result.pages.map(({ text, spans }) => ({ text, spans }))).toEqual([{ text: '', spans: [] }, { text: '', spans: [] }])
     expect(result).toMatchObject({ modelState: 'initialized', detectionMs: 35, recognitionMs: 40, detailPasses: 0 })
     expect(result.latencyMs).toBeGreaterThanOrEqual(0)
     expect(result.initializationMs).toBeGreaterThanOrEqual(0)
@@ -573,7 +579,9 @@ describe('browser OCR', () => {
   it('wraps an image decoding or inference failure with the page number', async () => {
     const { recognizeImages } = await moduleUnderTest()
     predict.mockRejectedValue(new Error('decode failed'))
-    await expect(recognizeImages([new File(['x'], 'bad.heic')])).rejects.toThrow('Could not read image 1')
+    const result = await recognizeImages([new File(['x'], 'bad.heic')])
+    expect(result.pages[0].source_units?.[0]).toMatchObject({ source_text: '', translation_status: 'source_crop', box: { x: 0, y: 0, width: 1, height: 1 } })
+    expect(result.recoveryWarnings[0]).toContain('decode failed')
   })
 
   it('can retry model initialization after a transient failure', async () => {
@@ -582,7 +590,9 @@ describe('browser OCR', () => {
     predict.mockResolvedValue([{ items: [{ text: 'ok', score: 1 }] }])
     const files = [new File(['x'], 'notice.png')]
 
-    await expect(recognizeImages(files)).rejects.toThrow('could not load its local models')
+    const fallback = await recognizeImages(files)
+    expect(fallback.pages[0].source_units?.[0].translation_status).toBe('source_crop')
+    expect(fallback.recoveryWarnings[0]).toContain('could not load its local models')
     await expect(recognizeImages(files)).resolves.toMatchObject({ pages: [{ text: 'ok' }] })
     expect(createEngine).toHaveBeenCalledTimes(2)
   })

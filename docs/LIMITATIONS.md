@@ -1,5 +1,35 @@
 # Limitations
 
+## Source ledger photo path
+
+The ledger guarantees retention of the inventory actually supplied by acquisition;
+it does not establish that OCR found every printed word or that an English paraphrase
+is semantically complete. Geometry-based block and table inference is conservative
+and can misclassify unfamiliar layouts, rotations, neighboring posters and decorative
+text. Candidate comparison, bounded region OCR and up to four vision recovery crops
+improve recovery but cannot reconstruct text that is genuinely illegible.
+
+Missing, duplicated or invalid translations cannot remove source units. Difficult
+fragments receive partial English, literal values/romanization where useful, and
+source crops. Those fallbacks are evidence, not verified instructions. The UI does
+not require users to correct Korean before receiving a result. Network/provider
+failures preserve the local source view, but can leave instructions unfinished.
+
+MyMemory quotas and wording errors remain limitations. The deterministic checks
+protect recognized values and a bounded set of conditions/negations; passing them
+does not prove general translation accuracy. Candidate and image-based source
+recoveries retain their provenance and original OCR instead of silently replacing it.
+
+Source-ID display coverage is reported separately from semantic coverage. Neither
+is a linguistic accuracy percentage. The 10–15 second goal requires measured
+photo evidence; it must not be inferred from tests or fixture timings. Current
+measurements and unresolved cases are in [ledger verification](SOURCE_LEDGER_VERIFICATION.md).
+
+## Earlier paths and overlay placement
+
+The following notes include legacy text/PDF/audit behavior. The browser photo UI
+now uses ledger endpoints rather than the older correction gate.
+
 ## Text-in-image translation prototype
 
 The independent image translator bypasses semantic analysis and source auditing.
@@ -14,15 +44,16 @@ not perspective correction or image inpainting. It can leave source glyph edges,
 produce visible patches, shrink longer English and retain severe overlaps or
 text that cannot fit. Parallel table cells stay separate, which preserves their
 positions but limits sentence context across columns. Photos not successfully
-detected by OCR cannot be completely translated. Per-region inspection shows
-all selected region texts, including retained originals, and replacement counts
-measure drawing only. The prototype supports one JPG/PNG/WebP under 15 MB and
-25 megapixels, up to 200 regions and 20,000 recognized characters per request.
+detected by OCR cannot be completely translated in this translation-only mode.
+The ledger English view and crop sidecars preserve all acquired units, including
+those not painted. Placement counts measure drawing only. Large images are
+downscaled for canvas rendering; bounded translation batches preserve source IDs
+when an individual API request would exceed its inventory/text limits.
 Provider quotas, network failures and browser capabilities remain external
 limits. It is not a guarantee that every image or every detected sentence will
 translate successfully. See [measured results](IMAGE_TRANSLATION_VERIFICATION.md).
 
-## Model and translation error
+## Legacy model and translation error
 
 OCR can corrupt Korean text, a free translator can mistranslate administrative language, and the semantic model can still omit or misclassify facts even when constrained by a schema. Version 2 now uses an initial structured extraction, optional batched English-field repair calls, and a separate completeness audit that may make a targeted retry. These checks consume additional OpenAI tokens and time. A [schema-conforming response can still contain mistakes](https://developers.openai.com/api/docs/guides/structured-outputs); human bilingual review remains necessary.
 
@@ -54,9 +85,10 @@ The hosted camera/image path runs PaddleOCR in the visitor's browser. First use
 must download the model/runtime assets, and inference depends on the device's
 CPU, memory, and browser support; the 10–15 second end-to-end target has not
 been met on the tested dense photo. This route sends recovered text and bounded
-normalized text positions to the API, not photo bytes. The API only reorders a
-clearly positioned two-column section; it leaves sparse tables and ambiguous
-layouts alone. The browser also attempts to decode HTTP(S) QR URLs locally, but
+normalized text positions and may send bounded recovery crops to the API. The
+ledger groups repeated spatial grids and keeps ambiguous regions crop-backed;
+its geometry heuristics cannot guarantee correct associations. The browser also
+attempts to decode HTTP(S) QR URLs locally, but
 this is best-effort and never opens a link automatically. Unlike local
 Python/Docker image analysis, the hosted route does not run server-side image
 quality checks. A false OCR reading—including a plausible-looking phone
@@ -112,7 +144,7 @@ The included answer scorer is intentionally simple and can misclassify synonymou
 
 ## Privacy and deployment
 
-SQLite and source-image storage have no user-account authentication or encryption. The hosted UI's browser-OCR camera/image path keeps photos on the visitor's device and persists only recognized text/results server-side. The local Python/Docker image API still stores originals and processed copies under `data/uploads` (or the cloud data volume) until manually removed; there is no retention scheduler. Public mode disables global notice browsing, editing, reprocessing, and study CSV export without a server-side administrator token, but stored results and any images uploaded through the legacy API still need protection. Do not submit private notices to the public deployment. OCR text is sent to the configured translation service. Photo semantics uses the Korean evidence directly; strict document/text semantics can also send the temporary translation to the semantic provider. Researchers must assess both providers' terms and institutional data-handling requirements before using sensitive material.
+SQLite and source-image storage have no user-account authentication or encryption. The hosted UI keeps original image files on the visitor's device and persists recognized text/results server-side. Optional bounded recovery crops can be sent to OpenAI through the API in memory only; they are absent from stored snapshots. The local Python/Docker image API stores originals and processed copies under `data/uploads` until manually removed. Public mode disables global notice browsing, editing, reprocessing, and study CSV export without a server-side administrator token. OCR text is sent to the configured translation service. The photo semantic request includes structured Korean source and any recovery crops; MyMemory output is a progressive reading aid and fallback. Researchers must assess provider terms and institutional handling requirements before using sensitive material.
 
 ## Deferred work
 

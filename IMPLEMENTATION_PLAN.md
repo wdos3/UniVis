@@ -1,5 +1,39 @@
 # Version 2 general notice recovery and latency work
 
+## Current implementation: source-preserving ledger (October 3, 2026)
+
+The current request supersedes earlier correction/withholding behavior below.
+Build the ledger before OCR readings are flattened or deduplicated. Retain stable
+source IDs, page IDs, boxes/polygons, confidence, alternate readings, order,
+paragraph/section and table membership. Layout blocks reference source IDs; they
+never replace or delete the source inventory.
+
+Translate bounded units/blocks concurrently, reconcile every response by exact ID
+and source membership, protect printed values and negations, and retain per-unit
+provider/status/fallback information. A missing or rejected response must create a
+source-linked English/literal/transliteration/crop fallback without blocking output.
+
+Use one complete structured semantic request over the ledger and bounded targeted
+repair of deterministic gaps. Preserve the configured gpt-4o-mini. Keep rejected
+generated claims rejected, but replace their source coverage with translated
+details in meaningful sections. Final display coverage counts source IDs and
+destinations separately from semantic meaning or translation accuracy.
+
+The browser will show grouped English translation before visual interpretation
+finishes. Preserve the original picture, paint polygon-aware overlays where safe,
+and show English beside the original crop when text cannot fit or readings compete.
+Bounded region crops may be sent for automatic vision recovery when text-only OCR
+cannot resolve a fragment, as requested; never persist those crop bytes or expose
+credentials. No paid OCR container or semantic model switch is authorized.
+
+Validation must cover Sogang, KCCI, a synthetic table/condition/noise fixture,
+reordered/missing/duplicate translation responses, omitted semantic source IDs,
+filter replacement, protected values/negations and nonblocking failures. Measure
+OCR, layout, translation, extraction, validation and rendering, plus actual model
+usage. Run backend/frontend tests, Ruff, ESLint, type/build checks, review the diff,
+exercise real photos, deploy only this branch to the linked site and verify it live.
+Do not claim complete meaning based on ID or citation coverage alone.
+
 ## Scope and constraints
 
 Continue `prototype/paddleocr-gpt41mini`; preserve Version 1 and keep Version 2 separate from the default branch. Keep browser-local photo bytes, PaddleOCR.js, temporary MyMemory translation, `gpt-4o-mini`, deterministic React rendering, and the existing Vercel static frontend/Python function packaging. Never infer unreadable values or expose credentials.
