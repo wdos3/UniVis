@@ -1,0 +1,44 @@
+{
+  "description": "Actual photo 01 restriction and intervening side-label text/geometry from the hosted af6034e run. Bounding boxes reconstructed from rendered crop CSS and image dimensions. Confidence and polygons were not exposed and are omitted, not reconstructed. No image bytes or model translations.",
+  "units": [
+    {
+      "id": "page-1-initial-observation-26",
+      "image_id": "support-photo-01",
+      "page_number": 1,
+      "order": 26,
+      "source_text": "대학혁신사업\"창의융합 자유연구 프로그램\"에서 지원하는 과제와 동일한 연구를",
+      "box": {
+        "x": 0.19599331,
+        "y": 0.7987752,
+        "width": 0.77961672,
+        "height": 0.03872549
+      }
+    },
+    {
+      "id": "page-1-initial-observation-27",
+      "image_id": "support-photo-01",
+      "page_number": 1,
+      "order": 27,
+      "source_text": "유의사항",
+      "box": {
+        "x": 0.06837979,
+        "y": 0.82475441,
+        "width": 0.09233449,
+        "height": 0.01715686
+      }
+    },
+    {
+      "id": "page-1-initial-observation-30",
+      "image_id": "support-photo-01",
+      "page_number": 1,
+      "order": 30,
+      "source_text": "수행하는 경우 지원 및 참여 제한",
+      "box": {
+        "x": 0.19773506,
+        "y": 0.83259848,
+        "width": 0.32752613,
+        "height": 0.0252451
+      }
+    }
+  ]
+}

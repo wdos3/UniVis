@@ -415,3 +415,64 @@ def test_actual_contest_prize_grid_keeps_categories_counts_and_amounts_together(
         "유의사항 및 문의사항",
     ):
         assert by_text[source].table_id is None
+
+
+def test_actual_restriction_continuation_survives_an_intervening_side_label():
+    fixture = json.loads(
+        (FIXTURES / "research_support_restriction_geometry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    source = [SourceUnit.model_validate(value) for value in fixture["units"]]
+    result = build_source_ledger(source)
+    assert any(
+        block.unit_ids == [source[0].id, source[2].id]
+        and "동일한 연구를\n수행하는 경우 지원 및 참여 제한" in block.source_text
+        for block in result.blocks
+    )
+    assert any(block.unit_ids == [source[1].id] for block in result.blocks)
+    assert sorted(
+        unit_id for block in result.blocks for unit_id in block.unit_ids
+    ) == sorted(unit.id for unit in source)
+
+
+def test_tilted_polygon_prose_is_not_a_heading_from_its_large_axis_aligned_box():
+    angled = unit(
+        "angled", "완성된 문장의 긴 설명으로 안내드립니다.", 0.1, 0.3, 0.7, 0.08
+    )
+    angled.polygon = [
+        SourcePoint(x=0.1, y=0.3),
+        SourcePoint(x=0.8, y=0.36),
+        SourcePoint(x=0.8, y=0.38),
+        SourcePoint(x=0.1, y=0.32),
+    ]
+    result = build_source_ledger(
+        [
+            unit("title", "연구활동 모집", 0.1, 0.04, 0.5, 0.05),
+            unit("body-a", "별도로 안내되는 첫 번째 문장입니다.", 0.1, 0.12, 0.7),
+            unit("body-b", "별도로 안내되는 두 번째 문장입니다.", 0.1, 0.2, 0.7),
+            angled,
+        ]
+    )
+    assert (
+        next(block for block in result.blocks if "angled" in block.unit_ids).kind
+        == "paragraph"
+    )
+    assert (
+        next(block for block in result.blocks if "title" in block.unit_ids).kind
+        == "heading"
+    )
+
+
+def test_same_anchor_section_heading_closes_an_open_paragraph():
+    result = build_source_ledger(
+        [
+            unit("first", "연구활동에 대한 첫 번째 안내입니다.", 0.1, 0.1, 0.7),
+            unit("heading", "새로운 지원 항목", 0.1, 0.13, 0.5, 0.05),
+            unit("second", "별도로 안내되는 새로운 조건입니다.", 0.1, 0.187, 0.7),
+        ]
+    )
+    assert not any(
+        "first" in block.unit_ids and "second" in block.unit_ids
+        for block in result.blocks
+    )

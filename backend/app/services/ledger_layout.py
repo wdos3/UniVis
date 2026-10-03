@@ -443,18 +443,36 @@ def _column_cut(rows: list[list[SourceUnit]]) -> float | None:
     return cut if sum(abs(value - cut) < 0.08 for value in candidates) >= 2 else None
 
 
+def _text_height(unit: SourceUnit) -> float:
+    # A tilted baseline inflates the axis-aligned box height. The short
+    # polygon sides estimate glyph height without treating prose as a title.
+    if len(unit.polygon) == 4:
+        edges = list(
+            zip(unit.polygon, [*unit.polygon[1:], unit.polygon[0]], strict=True)
+        )
+        sides = sorted(edges, key=lambda edge: abs(edge[0].x - edge[1].x))[:2]
+        height = median(abs(start.y - end.y) for start, end in sides)
+        if height > 0:
+            return height
+    return unit.box.height if unit.box else 0.02
+
+
 def _kind(unit: SourceUnit, typical_height: float) -> str:
     text = unit.source_text.strip()
     # Recognition confidence describes uncertainty, not whether text is a
     # heading, rule or topic. Longer uncertain clauses still enter paragraphs.
     if len(text) <= 2:
         return "caption"
-    if unit.box and unit.box.height > typical_height * 1.35 and len(text) <= 70:
-        return "heading"
     if re.match(r"^(?:[*※]|단[,\s]|다만|참고|주의)", text):
         return "condition"
     if re.match(r"^(?:\d+[.)]|[•●○▶-])", text):
         return "list"
+    if re.search(
+        r"[을를은는]$|(?:및|또는)$|(?:경우|때)\s*.+(?:제한|제외|가능|불가|불허)$", text
+    ):
+        return "paragraph"
+    if unit.box and _text_height(unit) > typical_height * 1.35 and len(text) <= 70:
+        return "heading"
     if len(text) <= 10 and not re.search(r"[\d.!?]|[은는을를]\s", text):
         return "heading"
     return "paragraph"
@@ -558,7 +576,7 @@ def build_source_ledger(
         )
         prose = [unit for unit in page_units if unit.id not in table_members]
         typical_height = (
-            median(unit.box.height for unit in positioned) if positioned else 0.02
+            median(_text_height(unit) for unit in positioned) if positioned else 0.02
         )
         columns: dict[int, list[SourceUnit]] = {}
         for unit in prose:
@@ -585,48 +603,54 @@ def build_source_ledger(
                 )
             )
             section = f"page-{page}-column-{column}"
-            previous: SourceBlock | None = None
-            last: SourceUnit | None = None
+            open_paragraphs: list[tuple[SourceBlock, SourceUnit]] = []
             for unit in members:
                 kind = _kind(unit, typical_height)
-                gap = (
-                    unit.box.y - (last.box.y + last.box.height)
-                    if unit.box and last and last.box
-                    else 1
-                )
-                aligned = bool(
-                    unit.box
-                    and last
+                open_paragraphs = [
+                    (block, last)
+                    for block, last in open_paragraphs
+                    if unit.box
                     and last.box
-                    and abs(unit.box.x - last.box.x) < 0.045
+                    and unit.box.y - (last.box.y + last.box.height)
+                    <= typical_height * 0.8
+                ]
+                previous = next(
+                    (
+                        block
+                        for block, last in reversed(open_paragraphs)
+                        if abs(unit.box.x - last.box.x) < 0.045
+                        and unit.box.y - (last.box.y + last.box.height)
+                        >= -max(unit.box.height, last.box.height) * 0.5
+                    ),
+                    None,
                 )
                 # A normal-sized short phrase often completes the preceding
                 # option or condition. Large or separated headings start anew.
                 if (
                     kind == "heading"
                     and previous
-                    and previous.kind in {"paragraph", "list", "condition"}
-                    and aligned
                     and unit.box
-                    and unit.box.height <= typical_height * 1.35
-                    and -typical_height * 0.5 <= gap <= typical_height * 0.8
+                    and _text_height(unit) <= typical_height * 1.35
                 ):
                     kind = "paragraph"
                 if kind == "heading":
                     section = derived_id("section", unit.id)
-                unit.section_id = section
-                continuation = (
-                    previous
-                    and previous.section_id == section
-                    and previous.kind in {"paragraph", "list", "condition"}
-                    and kind == "paragraph"
-                    and aligned
-                    and -typical_height * 0.5 <= gap <= typical_height * 0.8
-                )
-                if continuation:
+                    open_paragraphs = [
+                        (block, last)
+                        for block, last in open_paragraphs
+                        if abs(unit.box.x - last.box.x) >= 0.045
+                    ]
+                if previous and kind == "paragraph":
+                    # A side label between wrapped lines must not sever the
+                    # paragraph at a different horizontal anchor.
+                    unit.section_id = previous.section_id
                     previous.unit_ids.append(unit.id)
                     previous.source_text += "\n" + unit.source_text
+                    open_paragraphs = [
+                        pair for pair in open_paragraphs if pair[0] is not previous
+                    ]
                 else:
+                    unit.section_id = section
                     previous = SourceBlock(
                         id=derived_id("block", unit.id),
                         unit_ids=[unit.id],
@@ -635,7 +659,8 @@ def build_source_ledger(
                         source_text=unit.source_text,
                     )
                     blocks.append(previous)
-                last = unit
+                if kind in {"paragraph", "list", "condition"}:
+                    open_paragraphs.append((previous, unit))
     unit_lookup = {unit.id: unit for unit in ledger.units}
     for block in blocks:
         for unit_id in block.unit_ids:

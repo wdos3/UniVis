@@ -47,7 +47,7 @@ cases, including six KCCI score pairs and the separate essay-question count.
 
 Automated checks (repository root unless noted):
 
-- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,053 tests,
+- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,056 tests,
   including source retention, chunk reconciliation, omission/repair, source-ID
   shifts, incorrect thresholds, enrollment/funding conditions, crop isolation,
   uncertain-source display, and both real-poster geometry fixtures.
@@ -173,6 +173,18 @@ the adjacent ceremony paragraphs. The expanded observed fixture reproduced this
 failure before the boundary fix and passed afterward. The fix rejects a paragraph
 spanning multiple column anchors and trims a trailing label with no values;
 those units remain in ordinary source blocks.
+
+The photo 01 repeat on `af6034e` still detached its restriction (46 source and
+display IDs, 25 translated, 22 fallback; these dimensions can overlap). OCR
+40.4 s, MT 5.0 s, semantic 19.3 s, two requests, 26,130 input / 1,218 output /
+27,348 total tokens. The earlier wide-column fix alone did not solve this case.
+Retained crop geometry exposed an inflated axis-aligned height on tilted prose
+and a side label between its two lines. A three-unit observed fixture now checks
+the complete connected restriction with that label kept separate. Polygon-side
+text-height estimation and short-lived paragraphs tracked at horizontal anchors
+avoid the split without joining across a same-anchor section heading. Synthetic
+tilt and section-boundary tests protect those additional mechanics; the observed
+fixture does not invent confidence or polygons absent from the rendered DOM.
 
 Detailed OCR profiling of the earlier actual photo 04 run showed model reuse,
 14.5 s detection, 16.1 s recognition, two extra small-text checks and 1.7 s QR
