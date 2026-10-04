@@ -909,6 +909,9 @@ def _append_item(
 
 def _fallback_text(block: SourceBlock | None, units: list[SourceUnit]) -> str:
     source = _units_text(units)
+    local = literal_translation(source)
+    if local:
+        return local
     if (
         block
         and _english(block.english)
@@ -1084,6 +1087,13 @@ def _finish(
             fallback.add(unit.id)
     for block, units in groups:
         text = _fallback_text(block, units)
+        if literal_translation(_units_text(units)) == text:
+            # A whole connected clause establishes one shared translation.
+            # Keep all of its physical IDs and any uncertainty crops attached.
+            for unit in units:
+                unit.english = text
+                unit.translation_provider = "source-literal"
+                unit.translation_source_ids = [source.id for source in units]
         if any(
             marker in text
             for marker in (

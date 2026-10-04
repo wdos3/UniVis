@@ -1166,3 +1166,40 @@ def test_connected_support_condition_repairs_its_direction():
     assert "restricted from receiving support" not in simplified_text(outcome.notice)
     assert len(calls.calls) == 2
     assert_survives(outcome)
+
+
+def test_wrapped_leave_clause_gets_english_when_both_provider_readings_fail():
+    source = ledger(
+        [
+            ("*휴학생도 참여는 가능하나,연구비 및", ""),
+            ("활동비 지원 대상에서는 제외", ""),
+        ],
+        grouped=True,
+    )
+    fallback = best_effort_english("휴학생도")
+    source.blocks[0].english = fallback
+    for unit in source.units:
+        unit.english = fallback
+        unit.translation_status = "source_crop"
+    wrong = {
+        "unit_translations": {
+            "U000": "Students on leave cannot participate.",
+            "U001": "No funding.",
+        },
+        "block_kinds": {"B000": "eligibility"},
+        "recoveries": [],
+    }
+    calls = Responses(wrong, wrong)
+    outcome = run(source, calls)
+    english = "Students on leave may participate, but are excluded from research funding and activity allowance support."
+    assert english in simplified_text(outcome.notice)
+    assert "cannot participate" not in simplified_text(outcome.notice)
+    assert all(unit.english == english for unit in outcome.ledger.units)
+    assert all(
+        unit.translation_source_ids == ["U1", "U2"] for unit in outcome.ledger.units
+    )
+    assert all(
+        unit.translation_status == "source_crop" for unit in outcome.ledger.units
+    )
+    assert len(calls.calls) == 2
+    assert_survives(outcome)

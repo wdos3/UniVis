@@ -657,3 +657,14 @@ def test_support_recipients_are_restricted_from_participation_not_from_support()
         "Students and teams receiving support are restricted from participation."
     )
     assert ledger_translation.literal_translation(source + ", 단 예외 있음") is None
+
+
+def test_complete_wrapped_leave_clause_preserves_both_funding_exclusions():
+    source = "*휴학생도 참여는 가능하나,연구비 및\n활동비 지원 대상에서는 제외"
+    english = ledger_translation.literal_translation(source)
+    assert (
+        english
+        == "Students on leave may participate, but are excluded from research funding and activity allowance support."
+    )
+    assert validate_protected_values(source, english) == []
+    assert ledger_translation.literal_translation(source + ", 단 예외 있음") is None

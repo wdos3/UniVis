@@ -47,7 +47,7 @@ cases, including six KCCI score pairs and the separate essay-question count.
 
 Automated checks (repository root unless noted):
 
-- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,063 tests,
+- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,065 tests,
   including source retention, chunk reconciliation, omission/repair, source-ID
   shifts, incorrect thresholds, enrollment/funding conditions, crop isolation,
   uncertain-source display, and both real-poster geometry fixtures.
@@ -211,6 +211,18 @@ translation and a direction check now protect this general restriction pattern;
 tests cover both a local replacement and a targeted semantic repair of a longer
 clause. Exceptions appended to the source prevent the local template from
 matching, so it cannot silently erase extra conditions.
+
+On `751f5147100d55f50a4892a141444c3c7bc8f214`, actual photo 02 showed the
+correct restriction direction and no fabricated month/day stamp dates. It took
+42.8 s OCR, 5.6 s MT, 18.9 s semantic, 69.7 s browser elapsed and two semantic
+requests (29,630 input / 1,380 output / 31,010 total tokens). All 63 source IDs
+were displayed; 43 translated and 23 fallback IDs overlap where source uncertainty
+remains. However, the complete leave/funding clause stayed in romanization/crops
+after both readings failed, and was absent from the digest. A full-match local
+translation now handles that complete clause across connected units. The same
+shared English and source-ID set remain in the source view while uncertainty
+crops stay available. A regression simulates two incorrect provider readings
+and checks both leave participation and both funding exclusions in the digest.
 
 ## Remaining limits
 

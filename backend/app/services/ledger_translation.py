@@ -466,6 +466,15 @@ def literal_translation(source: str) -> str | None:
             "팀": "Teams",
         }[re.sub(r"\s+", "", supported_participants[1])]
         return f"{audience} receiving support are restricted from participation."
+    if re.fullmatch(
+        r"\s*[*·•-]?\s*휴학생도\s*(?:참여|참가)(?:는)?\s*가능하나\s*[,，]?\s*"
+        r"연구비\s*및\s*활동비\s*지원\s*대상(?:에서는|에서)?\s*제외\s*[.]?\s*",
+        source,
+    ):
+        return (
+            "Students on leave may participate, but are excluded from research funding "
+            "and activity allowance support."
+        )
     return None
 
 
