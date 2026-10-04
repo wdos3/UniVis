@@ -1,5 +1,12 @@
 # Version 2 general notice recovery and latency work
 
+October 4 implementation and measured release evidence are recorded in
+[SOURCE_LEDGER_VERIFICATION.md](docs/SOURCE_LEDGER_VERIFICATION.md). The source
+ledger, nonblocking photo recovery and regression checks are implemented. The
+10–15 second target, universal linguistic accuracy, complete in-image replacement
+and fresh in-app-browser PNG export verification remain unmet; the report keeps
+those limits separate from passing source-retention and targeted meaning checks.
+
 ## Current implementation: source-preserving ledger (October 3, 2026)
 
 The current request supersedes earlier correction/withholding behavior below.

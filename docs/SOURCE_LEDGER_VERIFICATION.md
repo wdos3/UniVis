@@ -162,7 +162,7 @@ enrollment/team clauses locally. Institution names in the local enrollment
 fallback are labeled as transliterations rather than asserted official English
 names. An observed 15-unit prize/adjacent-paragraph geometry fixture protects award/amount columns and table boundaries;
 its confidence is unavailable and is not invented. Final hosted checks for this
-correction are recorded below after deployment.
+correction are recorded below.
 
 On `af6034e8047143483cbcecb2031a51b75713aad8`, the repeated actual photo 04
 showed enrollment, leave permission and teams of up to three, and restored both
@@ -282,6 +282,74 @@ a crop/romanization instead of painting a guaranteed reward. This prevents that
 incorrect claim but does not supply a complete English interpretation. PNG
 download completion remains unverified; blob images are not exposed by the
 browser asset-export inventory either.
+
+## Final release verification
+
+Runtime code `8ebc29de94579ef75609c7aa62a7d20953fbe142` was deployed to the
+existing experimental project. Deployment `dpl_3GUqCiWBRnMHToGKU2Rr4pDK5iqU`
+was READY and the production alias resolved to
+`https://univis-v2-prototype-d29szwt3k-opcleaver0-6769s-projects.vercel.app`.
+The public alias remains `https://univis-v2-prototype.vercel.app/`.
+Only `prototype/paddleocr-gpt41mini` was pushed. There are no new merges;
+Version 1 assets, deployment configuration, Python version, API entry point and
+dependency manifests were unchanged from entry. The verification-document
+commit follows the runtime commit without changing its code.
+
+Final actual photo repeats used the configured `gpt-4o-mini`:
+
+| Photo / code | Source / translated / fallback / displayed IDs | OCR / MT / semantic | Semantic calls | Input / output / total tokens | Browser elapsed |
+| --- | --- | --- | ---: | --- | ---: |
+| 02 creative research / 8ebc29d | 63 / 45 / 20 / 63 | 39.2 / 15.7 / 20.2 s | 2 | 30,059 / 1,443 / 31,502 | 78.2 s |
+| 04 video contest / 8ebc29d | 76 / 52 / 24 / 76 | 43.4 / 7.1 / 16.2 s | 1 | 22,793 / 1,072 / 23,865 | 70.2 s |
+| 06 hiring / 81a999a, before count/heading fix | 99 / 86 / 13 / 99 | 61.6 / 22.0 / 20.2 s | 1 | 27,648 / 1,715 / 29,363 | 106.7 s |
+
+Translated/fallback dimensions can overlap and must not be added to infer a
+source count. Successful semantic usage shown here is complete. The unique
+rendered `data-source-unit-id` counts matched these source inventories. The
+rendered English source paragraphs contained no Hangul; Korean remains
+intentionally available in source evidence and unpainted image regions.
+
+Photo 02 showed the application dates and three documents, enrolled-student
+condition, complete leave/funding exclusion, 2–5 members, both duplicate-support
+rules, designated AI wearable/AIX/MVP, AI-is-Everywhere, core-technology and robot
+options, student-chosen topics, both KRW 200,000 categories and the maximum,
+equipment/material/book/printing expenses, visit/card payment, scholarship and
+contact values. Previously unsupported stamp dates were absent. Some topic
+fragments were reordered and institutional wording remained awkward; seal text
+still produced poor English. This list records observed checks, not an assertion
+that all source meaning was verified.
+
+Photo 04 now showed the October 26 ceremony and requirement that at least one
+winner attend, together with the guidelines and `iges@sogang.ac.kr`. The two
+award columns retained 1 versus 3 works, team KRW 1,000,000 versus 500,000 and
+individual KRW 500,000 versus 250,000. The prize table was visually inspected at
+the actual narrow browser width, separate from its adjacent ceremony paragraphs.
+Enrollment, allowed leave, up to three people, video format/length, submission
+and result dates were visible. Clipped neighboring poster text still entered
+additional details. The earlier photo 01 on `2f74513` connected the restriction
+and preserved its second-installment/final-report rule; it was not repeated on
+the final code. All five supplied photos were exercised across the recorded runs.
+
+On final code, image-only photo 03 painted 24/40 units and displayed all 40 source
+IDs (30 translated / 10 fallback). It took 40.5 s OCR, 12.3 s client translation
+wait (11.7 s recorded ledger MT), 7.3 s drawing and 60.1 s total, with 32 known
+MT requests and 44 positioned spans. No semantic call ran. The actual image and
+original/translated toggle were inspected again. The lottery clause remains a
+crop/romanization; the image is not a complete English replacement. A direct
+download-link click did not provide a verifiable fresh PNG file. Files found in
+Downloads were older October 3 exports and are not proof of this run's export.
+The final blob was visible, but the browser asset inventory did not expose it.
+
+After deployment, `/`, `/api/health`, frontend JS/CSS, OCR worker, bundled/public
+ORT WASM, QR module and both OCR model archives returned HTTP 200 with expected
+content types. Health reported OpenAI, MyMemory, `gpt-4o-mini`, public mode and
+`source-ledger-v1`. A hosted 20-unit KCCI geometry API smoke returned HTTP 200
+for translation and mock analysis, retained all IDs/English and used zero
+semantic calls in 5.413 s. That mock smoke verifies packaging/reconciliation,
+not model comprehension. Automated release checks remain 1,077 backend tests,
+159 frontend tests, Ruff, ESLint, TypeScript/Vite build and diff checks passed.
+The Vercel release build also passed using Python 3.12 and Version 1 asset
+preservation. Existing browser-module/large-chunk build warnings remain.
 
 ## Remaining limits
 
