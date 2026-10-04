@@ -668,3 +668,28 @@ def test_complete_wrapped_leave_clause_preserves_both_funding_exclusions():
     )
     assert validate_protected_values(source, english) == []
     assert ledger_translation.literal_translation(source + ", 단 예외 있음") is None
+
+
+@pytest.mark.parametrize("count, word", [(1, "one"), (3, "three"), (10, "ten")])
+def test_small_count_comparisons_accept_the_exact_written_english_number(count, word):
+    assert (
+        validate_protected_values(
+            f"수상자 {count}인 이상 필참", f"At least {word} winners must attend."
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "english",
+    [
+        "At least two winners must attend.",
+        "More than one winner must attend.",
+        "At least one hundred winners must attend.",
+        "At least twenty one winners must attend.",
+    ],
+)
+def test_count_word_normalization_does_not_change_number_or_threshold_direction(
+    english,
+):
+    assert validate_protected_values("수상자 1인 이상 필참", english)

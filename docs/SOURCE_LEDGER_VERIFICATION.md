@@ -47,7 +47,7 @@ cases, including six KCCI score pairs and the separate essay-question count.
 
 Automated checks (repository root unless noted):
 
-- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,068 tests,
+- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,077 tests,
   including source retention, chunk reconciliation, omission/repair, source-ID
   shifts, incorrect thresholds, enrollment/funding conditions, crop isolation,
   uncertain-source display, and both real-poster geometry fixtures.
@@ -213,7 +213,7 @@ clause. Exceptions appended to the source prevent the local template from
 matching, so it cannot silently erase extra conditions.
 
 On `751f5147100d55f50a4892a141444c3c7bc8f214`, actual photo 02 showed the
-correct restriction direction and no fabricated month/day stamp dates. It took
+correct restriction direction and no unsupported month/day stamp dates. It took
 42.8 s OCR, 5.6 s MT, 18.9 s semantic, 69.7 s browser elapsed and two semantic
 requests (29,630 input / 1,380 output / 31,010 total tokens). All 63 source IDs
 were displayed; 43 translated and 23 fallback IDs overlap where source uncertainty
@@ -247,6 +247,41 @@ source; the prompt explicitly requires original-language transcription. Tests
 protect rejection of this date laundering and preserve legitimate attached-crop
 Korean recovery. This contract check cannot prove every native-language vision
 reading correct.
+
+On `81a999a80f82f69a21c1d95189819df41e2eca32`, actual photo 06 retained all
+six score pairs and kept approximately three questions with the essay stage,
+including application restrictions, interview documents, stages and employment
+conditions. It displayed 99 source IDs (86 translated / 13 fallback), with
+61.6 s OCR, 22.0 s MT, 20.2 s semantic and 106.7 s browser elapsed. One semantic
+call used 27,648 input / 1,715 output / 29,363 total tokens. Graduate eligibility
+wording remained awkward and duplicated stage fragments remained; this is a
+targeted pairing/scope check, not a full bilingual accuracy pass.
+
+The actual photo 04 run on the same code displayed 76 source IDs (44 translated /
+32 fallback), with 42.4 s OCR, 10.6 s MT, 20.2 s semantic, 75.9 s browser elapsed
+and two calls (27,497
+input / 1,334 output / 28,831 total tokens). Both prize categories retained their
+work counts and team/individual amounts, and enrollment/leave/team-size clauses
+were visible. Ceremony/attendance/contact details stayed only in crop fallbacks.
+A direct check reproduced rejection of correct English "at least one winner"
+against the printed `1` threshold. Normalization now covers small written counts
+in explicit comparison phrases beside count nouns, leaving scores, money, dates
+and compound numbers untouched. Wrong values and reversed limits still fail.
+The compound notes/contact heading was also absorbed into its preceding paragraph;
+recognized administrative headings now close that paragraph at the same anchor.
+Regression tests cover that boundary and preservation of a complete ceremony,
+attendance and contact block without a second semantic call.
+
+The latest image-only photo 03 run painted 24/40 source units and displayed all
+40 IDs, with no semantic call: 35.2 s OCR, 10.8 s MT, 1.3 s drawing and 47.2 s
+overall, 32 known MT requests and 44 positioned spans. The frontend renderer
+is unchanged in the release; this run predates the final count/heading patches.
+The original/translated toggle and actual
+painted image were inspected. The lottery guard retained the survey clause as
+a crop/romanization instead of painting a guaranteed reward. This prevents that
+incorrect claim but does not supply a complete English interpretation. PNG
+download completion remains unverified; blob images are not exposed by the
+browser asset-export inventory either.
 
 ## Remaining limits
 

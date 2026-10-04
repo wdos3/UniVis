@@ -1282,3 +1282,32 @@ def test_attached_vision_can_still_recover_original_korean_transcription():
     assert outcome.ledger.units[0].recovery_source == "vision"
     assert "Student event." in simplified_text(outcome.notice)
     assert_survives(outcome)
+
+
+def test_ceremony_and_contact_block_survives_a_written_count_comparison():
+    source = ledger(
+        [
+            ("2026.10.26(월) 비전선포식", ""),
+            ("수상작 전시 및 시상식 진행(수상자 1인 이상 필참)", ""),
+            ("문의 iges@example.org", ""),
+        ],
+        grouped=True,
+    )
+    response = {
+        "unit_translations": {
+            "U000": "Vision proclamation ceremony: 2026.10.26 (Monday).",
+            "U001": "Winning works will be exhibited and an awards ceremony held; at least one winner must attend.",
+            "U002": "Contact iges@example.org.",
+        },
+        "block_kinds": {"B000": "detail"},
+        "recoveries": [],
+    }
+    calls = Responses(response)
+    outcome = run(source, calls)
+    digest = simplified_text(outcome.notice)
+    assert "2026.10.26" in digest
+    assert "at least one winner must attend" in digest
+    assert "iges@example.org" in digest
+    assert len(calls.calls) == 1
+    assert outcome.ledger.coverage.fallback_unit_ids == []
+    assert_survives(outcome)

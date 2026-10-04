@@ -133,6 +133,26 @@ _DECIMAL_THRESHOLD = re.compile(
     r"(?<![\w.])(\d+\.\d+)\s*(?:점\s*)?(이상|이하|초과|미만)"
 )
 _NUMBER = re.compile(r"(?<![A-Za-z0-9])\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])")
+_SMALL_COUNT_WORDS = (
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+)
+_ENGLISH_COUNT_COMPARISON = re.compile(
+    r"\b(at least|at most|up to|more than|less than)\s+("
+    + "|".join(_SMALL_COUNT_WORDS)
+    + r")\s+(?=(?:of\s+(?:the\s+)?)?(?:award\s+)?"
+    r"(?:people|persons?|students?|participants?|members?|winners?|teams?|works?|questions?|documents?)\b)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -206,12 +226,19 @@ def validate_protected_values(source: str, english: str) -> list[str]:
         lambda match: f"[decimal threshold] {match[2]}", source
     )
     legacy_english = re.sub(r"\bTOEFLiBT\b", "TOEFL iBT", english, flags=re.IGNORECASE)
+    # Natural small-count comparisons are equivalent to printed digits. Keep
+    # dates, scores, money and compound numbers outside this normalization.
+    numeric_english = _ENGLISH_COUNT_COMPARISON.sub(
+        lambda match: f"{match[1]} {_SMALL_COUNT_WORDS.index(match[2].casefold())} ",
+        legacy_english,
+    )
     issues = [
         f"missing value: {value}"
-        for value in missing_source_values(legacy_source, legacy_english)
+        for value in missing_source_values(legacy_source, numeric_english)
     ]
     english_numbers = {
-        Decimal(match.group().replace(",", "")) for match in _NUMBER.finditer(english)
+        Decimal(match.group().replace(",", ""))
+        for match in _NUMBER.finditer(numeric_english)
     }
     for number, _ in _DECIMAL_THRESHOLD.findall(source):
         if Decimal(number) not in english_numbers:

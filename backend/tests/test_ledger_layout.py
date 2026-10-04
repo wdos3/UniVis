@@ -476,3 +476,29 @@ def test_same_anchor_section_heading_closes_an_open_paragraph():
         "first" in block.unit_ids and "second" in block.unit_ids
         for block in result.blocks
     )
+
+
+def test_compound_administrative_heading_closes_the_ceremony_paragraph():
+    source = [
+        unit("ceremony", "2026.10.26(월) 비전선포식", 0.5, 0.70, 0.4, 0.02),
+        unit(
+            "attendance",
+            "수상작 전시 및 시상식 진행(수상자 1인 이상 필참)",
+            0.5,
+            0.725,
+            0.4,
+            0.02,
+        ),
+        unit("notes", "유의사항 및 문의사항", 0.5, 0.76, 0.2, 0.02),
+        unit("guidance", "유의사항은 Splus 공모전 요강을 참조", 0.5, 0.79, 0.4, 0.02),
+        unit("contact", "문의 iges@example.org", 0.5, 0.82, 0.4, 0.02),
+    ]
+    result = build_source_ledger(source)
+    assert (
+        next(block for block in result.blocks if "notes" in block.unit_ids).kind
+        == "heading"
+    )
+    ceremony = next(block for block in result.blocks if "ceremony" in block.unit_ids)
+    assert ceremony.unit_ids == ["ceremony", "attendance"]
+    assert not set(ceremony.unit_ids) & {"notes", "guidance", "contact"}
+    assert [entry.id for entry in result.units] == [entry.id for entry in source]

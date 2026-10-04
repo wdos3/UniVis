@@ -9,6 +9,11 @@ from app.models import LedgerMetrics, SourceBlock, SourceLedger, SourceUnit
 from app.services.ledger_ids import derived_id
 from app.services.extraction.language_scores import EXAM_NAME, EXAM_SUFFIX, SCORE
 
+_ADMINISTRATIVE_HEADING = re.compile(
+    r"(?:유의사항|주의사항|문의사항|안내사항)"
+    r"(?:\s*(?:및|/|&)\s*(?:유의사항|주의사항|문의사항|안내사항))?"
+)
+
 
 @dataclass
 class _ExamCell:
@@ -463,6 +468,8 @@ def _kind(unit: SourceUnit, typical_height: float) -> str:
     # heading, rule or topic. Longer uncertain clauses still enter paragraphs.
     if len(text) <= 2:
         return "caption"
+    if _ADMINISTRATIVE_HEADING.fullmatch(text):
+        return "heading"
     if re.match(r"^(?:[*※]|단[,\s]|다만|참고|주의)", text):
         return "condition"
     if re.match(r"^(?:\d+[.)]|[•●○▶-])", text):
@@ -631,6 +638,7 @@ def build_source_ledger(
                     and previous
                     and unit.box
                     and _text_height(unit) <= typical_height * 1.35
+                    and not _ADMINISTRATIVE_HEADING.fullmatch(unit.source_text.strip())
                 ):
                     kind = "paragraph"
                 if kind == "heading":
