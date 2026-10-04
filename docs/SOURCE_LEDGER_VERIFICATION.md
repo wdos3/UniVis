@@ -47,7 +47,7 @@ cases, including six KCCI score pairs and the separate essay-question count.
 
 Automated checks (repository root unless noted):
 
-- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,066 tests,
+- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,068 tests,
   including source retention, chunk reconciliation, omission/repair, source-ID
   shifts, incorrect thresholds, enrollment/funding conditions, crop isolation,
   uncertain-source display, and both real-poster geometry fixtures.
@@ -189,7 +189,7 @@ fixture does not invent confidence or polygons absent from the rendered DOM.
 The photo 02 repeat on `2f74513` retained the required substantive details and
 63 displayed source IDs (48 translated / 15 fallback), at 39.6 s OCR, 4.4 s MT,
 16.6 s semantic, 63.3 s measured browser elapsed, two requests and 25,059 input /
-1,261 output / 26,320 total tokens. It still fabricated stamp dates as `Until
+1,261 output / 26,320 total tokens. It still stamp dates unsupported by accepted transcription as `Until
 9/16` and `from 9/10`, rather than written month names. This is another failed
 fidelity run. Date recognition now covers standalone date prepositions with
 numeric month/day formats. A four-unit regression prevents a readable neighboring
@@ -235,6 +235,18 @@ English text and the complete source-ID set. A test protects this accepted-outpu
 case independently of the failed-provider fallback case. Seal noise still produces
 unhelpful English in additional details; those IDs remain crop-linked and are not
 evidence of verified meaning.
+
+Actual photo 02 on `fbf1de4` showed the complete, consistent leave/funding clause
+and correct participation restriction, but stamp dates unsupported by accepted transcription reappeared as
+English vision "transcriptions." This bypassed the ordinary translation-date
+guard by changing the effective source. The run retained 63 source/display IDs
+(49 translated / 14 fallback), with 37.5 s OCR, 8.4 s MT, 25.3 s semantic, 73.9 s browser elapsed and
+two calls (30,354 input / 1,484 output / 31,838 total tokens). It is a failed
+fidelity run. Vision recovery now rejects an English-only replacement for Korean
+source; the prompt explicitly requires original-language transcription. Tests
+protect rejection of this date laundering and preserve legitimate attached-crop
+Korean recovery. This contract check cannot prove every native-language vision
+reading correct.
 
 ## Remaining limits
 

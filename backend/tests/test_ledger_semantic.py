@@ -1234,3 +1234,51 @@ def test_accepted_wrapped_leave_clause_uses_the_complete_source_translation():
     )
     assert len(calls.calls) == 1
     assert_survives(outcome)
+
+
+def test_english_recovery_cannot_launder_an_unsupported_date_from_korean_noise():
+    source = ledger([("기간입C이끼지", best_effort_english("기간입C이끼지"))])
+    source.units[0].translation_status = "source_crop"
+    bad = {
+        "unit_translations": {"U000": "Until September 16"},
+        "block_kinds": {"B000": "document"},
+        "recoveries": [
+            {
+                "source_unit_id": "U000",
+                "recovered_source_text": "Until September 16",
+                "method": "vision",
+            }
+        ],
+    }
+    region = LedgerVisionRegion(
+        unit_ids=["U1"], data_url="data:image/png;base64,iVBORw0KGgo="
+    )
+    outcome = run(source, Responses(bad, bad), regions=[region])
+    assert outcome.ledger.units[0].recovered_source_text is None
+    assert "September 16" not in simplified_text(outcome.notice)
+    assert "September 16" not in outcome.ledger.units[0].english
+    assert_survives(outcome)
+
+
+def test_attached_vision_can_still_recover_original_korean_transcription():
+    source = ledger([("학생행", "Student event.")])
+    source.units[0].confidence = 0.7
+    response = {
+        "unit_translations": {"U000": "Student event."},
+        "block_kinds": {"B000": "detail"},
+        "recoveries": [
+            {
+                "source_unit_id": "U000",
+                "recovered_source_text": "학생 행사",
+                "method": "vision",
+            }
+        ],
+    }
+    region = LedgerVisionRegion(
+        unit_ids=["U1"], data_url="data:image/png;base64,iVBORw0KGgo="
+    )
+    outcome = run(source, Responses(response), regions=[region])
+    assert outcome.ledger.units[0].recovered_source_text == "학생 행사"
+    assert outcome.ledger.units[0].recovery_source == "vision"
+    assert "Student event." in simplified_text(outcome.notice)
+    assert_survives(outcome)
