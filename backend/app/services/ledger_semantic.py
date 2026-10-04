@@ -1037,8 +1037,16 @@ def _finish(
             unit.translation_source_ids = [unit.id]
     covered: set[str] = set()
     for item in items:
+        is_title = item is title_item
         units = [by_id[unit_id] for unit_id in item.source_unit_ids]
-        ref = _append_item(notice, item, units, is_title=item is title_item)
+        local = literal_translation(_units_text(units))
+        if local:
+            item = item.model_copy(update={"text": local})
+            for unit in units:
+                unit.english = local
+                unit.translation_provider = "source-literal"
+                unit.translation_source_ids = list(item.source_unit_ids)
+        ref = _append_item(notice, item, units, is_title=is_title)
         for unit in units:
             unit.semantic_refs = list(dict.fromkeys([*unit.semantic_refs, ref]))
         covered.update(item.source_unit_ids)

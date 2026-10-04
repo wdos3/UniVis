@@ -47,7 +47,7 @@ cases, including six KCCI score pairs and the separate essay-question count.
 
 Automated checks (repository root unless noted):
 
-- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,065 tests,
+- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,066 tests,
   including source retention, chunk reconciliation, omission/repair, source-ID
   shifts, incorrect thresholds, enrollment/funding conditions, crop isolation,
   uncertain-source display, and both real-poster geometry fixtures.
@@ -223,6 +223,18 @@ translation now handles that complete clause across connected units. The same
 shared English and source-ID set remain in the source view while uncertainty
 crops stay available. A regression simulates two incorrect provider readings
 and checks both leave participation and both funding exclusions in the digest.
+
+The next photo 02 run on `698c4b3` displayed the leave clause and correct support
+restriction, all topics, application/document details, funding/payment rules and
+contacts. It retained 63 source/display IDs (51 translated / 12 fallback), with
+37.1 s OCR, 15.9 s MT, 17.1 s semantic and two calls (28,481 input / 1,388 output /
+29,869 total tokens). The accepted leave translation was grammatically incomplete
+across its two units. Whole-clause source translations now replace that wording
+even when the provider output passes protected-value checks, with one shared
+English text and the complete source-ID set. A test protects this accepted-output
+case independently of the failed-provider fallback case. Seal noise still produces
+unhelpful English in additional details; those IDs remain crop-linked and are not
+evidence of verified meaning.
 
 ## Remaining limits
 

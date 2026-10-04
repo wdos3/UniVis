@@ -1203,3 +1203,34 @@ def test_wrapped_leave_clause_gets_english_when_both_provider_readings_fail():
     )
     assert len(calls.calls) == 2
     assert_survives(outcome)
+
+
+def test_accepted_wrapped_leave_clause_uses_the_complete_source_translation():
+    source = ledger(
+        [
+            ("*휴학생도 참여는 가능하나,연구비 및", ""),
+            ("활동비 지원 대상에서는 제외", ""),
+        ],
+        grouped=True,
+    )
+    response = {
+        "unit_translations": {
+            "U000": "Students on leave may participate, but research funding and",
+            "U001": "excluded from activity allowance support.",
+        },
+        "block_kinds": {"B000": "eligibility"},
+        "recoveries": [],
+    }
+    calls = Responses(response)
+    outcome = run(source, calls)
+    english = "Students on leave may participate, but are excluded from research funding and activity allowance support."
+    assert english in simplified_text(outcome.notice)
+    assert all(unit.english == english for unit in outcome.ledger.units)
+    assert all(
+        unit.translation_provider == "source-literal" for unit in outcome.ledger.units
+    )
+    assert all(
+        unit.translation_source_ids == ["U1", "U2"] for unit in outcome.ledger.units
+    )
+    assert len(calls.calls) == 1
+    assert_survives(outcome)
