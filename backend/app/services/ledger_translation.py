@@ -454,6 +454,18 @@ def literal_translation(source: str) -> str | None:
     )
     if team:
         return f"Individuals or teams of up to {team[1]} people may participate."
+    supported_participants = re.fullmatch(
+        r"\s*지원\s*을?\s*받는\s*(학생\s*및\s*팀|학생|팀)\s*(?:은|는)\s*"
+        r"참여\s*(?:가\s*)?제한\s*[.]?\s*",
+        source,
+    )
+    if supported_participants:
+        audience = {
+            "학생및팀": "Students and teams",
+            "학생": "Students",
+            "팀": "Teams",
+        }[re.sub(r"\s+", "", supported_participants[1])]
+        return f"{audience} receiving support are restricted from participation."
     return None
 
 

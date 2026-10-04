@@ -141,6 +141,17 @@ def _source_issues(source: str, english: str) -> list[str]:
         issues.append(
             "changed card-payment procedure: visiting the center and paying by card are connected"
         )
+    if re.search(
+        r"지원\s*을?\s*받는[\s\S]{0,60}참여\s*(?:가\s*)?제한", source
+    ) and re.search(
+        r"\b(?:restrict\w*|prohibit\w*|exclud\w*|not (?:allowed|eligible)|ineligible)\b"
+        r"\s+(?:from\s+|to\s+|for\s+)?(?:receiv\w*\s+)?(?:support|funding)\b",
+        english,
+        re.IGNORECASE,
+    ):
+        issues.append(
+            "changed condition direction: support recipients cannot participate, not the reverse"
+        )
     for count in re.findall(r"논술[\s\S]{0,160}?(\d+)\s*(?:문제|문항)", source):
         if not re.search(
             rf"\b(?:essay|written|writing)\b[\s\S]{{0,220}}\b{re.escape(count)}\s+questions?\b",

@@ -649,3 +649,11 @@ def test_a_survey_lottery_cannot_be_translated_as_a_guaranteed_reward():
         )
         == []
     )
+
+
+def test_support_recipients_are_restricted_from_participation_not_from_support():
+    source = "지원을 받는 학생 및 팀은 참여 제한"
+    assert ledger_translation.literal_translation(source) == (
+        "Students and teams receiving support are restricted from participation."
+    )
+    assert ledger_translation.literal_translation(source + ", 단 예외 있음") is None

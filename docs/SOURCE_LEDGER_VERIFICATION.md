@@ -47,7 +47,7 @@ cases, including six KCCI score pairs and the separate essay-question count.
 
 Automated checks (repository root unless noted):
 
-- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,060 tests,
+- `backend/.venv/Scripts/python.exe -m pytest backend/tests -q`: 1,063 tests,
   including source retention, chunk reconciliation, omission/repair, source-ID
   shifts, incorrect thresholds, enrollment/funding conditions, crop isolation,
   uncertain-source display, and both real-poster geometry fixtures.
@@ -199,6 +199,18 @@ Detailed OCR profiling of the earlier actual photo 04 run showed model reuse,
 14.5 s detection, 16.1 s recognition, two extra small-text checks and 1.7 s QR
 work in parallel, for 32.2 s acquisition. This confirms that substantial OCR
 latency persists after initialization; it is not solely a cold-download delay.
+
+The next actual photo 02 run on `3f5e834` removed those unsupported month/day
+dates, but reversed a clear support restriction: it said participating students
+could not receive support instead of saying support recipients could not
+participate. It retained 63 source/display IDs (46 translated / 17 fallback),
+with 40.5 s OCR, 5.7 s MT, 15.9 s semantic and 65.4 s browser elapsed. Two
+requests used 28,692 input / 1,375 output / 30,067 total tokens. This is another
+failed meaning check despite full displayed-ID coverage. A whole-clause local
+translation and a direction check now protect this general restriction pattern;
+tests cover both a local replacement and a targeted semantic repair of a longer
+clause. Exceptions appended to the source prevent the local template from
+matching, so it cannot silently erase extra conditions.
 
 ## Remaining limits
 

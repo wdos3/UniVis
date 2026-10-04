@@ -1111,3 +1111,58 @@ def test_numeric_stamp_dates_cannot_hide_inside_an_otherwise_readable_block():
     assert "9/16" not in digest and "9/10" not in digest
     assert "romanized" not in digest
     assert_survives(outcome)
+
+
+def test_clear_support_restriction_survives_a_reversed_model_condition():
+    source = ledger([("지원을 받는 학생 및 팀은 참여 제한", "")])
+    calls = Responses(
+        LedgerSemanticResponse(
+            items=[
+                item(
+                    ["U1"],
+                    "Participating students and teams are restricted from receiving support.",
+                    "exception",
+                )
+            ]
+        )
+    )
+    outcome = run(source, calls)
+    assert (
+        "Students and teams receiving support are restricted from participation."
+        in simplified_text(outcome.notice)
+    )
+    assert "restricted from receiving support" not in simplified_text(outcome.notice)
+    assert len(calls.calls) == 1
+    assert_survives(outcome)
+
+
+def test_connected_support_condition_repairs_its_direction():
+    source = ledger([("동일 연구 주제로 지원을 받는 학생 및 팀은 참여 제한", "")])
+    calls = Responses(
+        LedgerSemanticResponse(
+            items=[
+                item(
+                    ["U1"],
+                    "Participating students and teams on the same research topic are restricted from receiving support.",
+                    "exception",
+                )
+            ]
+        ),
+        LedgerSemanticResponse(
+            items=[
+                item(
+                    ["U1"],
+                    "Students and teams receiving support for the same research topic are restricted from participation.",
+                    "exception",
+                )
+            ]
+        ),
+    )
+    outcome = run(source, calls)
+    assert (
+        "receiving support for the same research topic are restricted from participation"
+        in simplified_text(outcome.notice)
+    )
+    assert "restricted from receiving support" not in simplified_text(outcome.notice)
+    assert len(calls.calls) == 2
+    assert_survives(outcome)
